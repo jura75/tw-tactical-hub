@@ -1,4 +1,4 @@
-(function() {
+javascript:(function() {
     let existingPanel = document.getElementById('custom-tactical-hub');
     if (existingPanel) {
         if (existingPanel.style.display === 'none') {
