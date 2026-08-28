@@ -1,0 +1,964 @@
+(function() {
+    let existingPanel = document.getElementById('custom-tactical-hub');
+    if (existingPanel) {
+        if (existingPanel.style.display === 'none') {
+            existingPanel.style.display = 'flex';
+        } else {
+            existingPanel.style.display = 'none';
+        }
+        return;
+    }
+
+    let savedPlans = localStorage.getItem('tw_hub_planned_orders');
+    let plannedOrders = savedPlans ? JSON.parse(savedPlans) : [];
+    
+    let savedFilters = localStorage.getItem('tw_hub_unit_filters');
+    let unitFilterStates = savedFilters ? JSON.parse(savedFilters) : [true, true, true, true, true, true, true, true, true];
+
+    let savedTcTargets = localStorage.getItem('tw_hub_tc_targets') || '';
+    
+    const unitSpeeds = [1800, 2100, 1080, 900, 600, 660, 1800, 1800, 600]; 
+    const unitNames = ['Копья', 'Мечи', 'Топоры', 'Развед', 'ЛК', 'ТК', 'Тараны', 'Каты', 'Паладин'];
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(8, 0, 0, 0);
+    const defDateStr = `${String(tomorrow.getDate()).padStart(2,'0')}.${String(tomorrow.getMonth()+1).padStart(2,'0')}.${tomorrow.getFullYear()} 08:00:00`;
+    
+    let savedTcArrival = localStorage.getItem('tw_hub_tc_arrival') || defDateStr;
+    let savedMaxTarget = localStorage.getItem('tw_hub_tc_max_target') || '1';
+    let savedMaxSource = localStorage.getItem('tw_hub_tc_max_source') || '1';
+
+    let currentActiveTab = localStorage.getItem('tw_hub_active_tab') || 'incomings';
+    // Если раньше были сохранены удаленные вкладки, сбрасываем на 'incomings'
+    if (['hub', 'tribe', 'stats'].includes(currentActiveTab)) {
+        currentActiveTab = 'incomings';
+    }
+
+    let tcCache = { selectedPairs: null, arrivalDateMs: null };
+    let incCache = { attacks: null, playerVillages: null, selectedAttack: null, availableOptions: null };
+
+    function formatDateStr(date) {
+        let d = String(date.getDate()).padStart(2, '0');
+        let m = String(date.getMonth() + 1).padStart(2, '0');
+        let y = date.getFullYear();
+        let h = String(date.getHours()).padStart(2, '0');
+        let min = String(date.getMinutes()).padStart(2, '0');
+        let s = String(date.getSeconds()).padStart(2, '0');
+        return `${d}.${m}.${y} ${h}:${min}:${s}`;
+    }
+
+    function savePlans() {
+        localStorage.setItem('tw_hub_planned_orders', JSON.stringify(plannedOrders));
+        const countElem = document.getElementById('plan-count');
+        if (countElem) countElem.innerText = plannedOrders.length;
+    }
+
+    const panel = document.createElement('div');
+    panel.id = 'custom-tactical-hub';
+    panel.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 1280px;
+        max-height: 92vh;
+        background: #2b1d0c;
+        border: 4px solid #7d510f;
+        box-shadow: 0 0 25px rgba(0,0,0,0.9);
+        z-index: 99999;
+        font-family: Verdana, Arial, sans-serif;
+        color: #f4e4bc;
+        border-radius: 4px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    `;
+
+    panel.innerHTML = `
+        <div style="background: #1a1006; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f;">
+            <div>
+                <b style="font-size: 14px; color: #f4e4bc;">Custom Tactical Hub</b>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.17 • Clean Tabs</span>
+            </div>
+            <div>
+                <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 10px; cursor: pointer; border-radius: 3px; margin-right: 5px;">Сканировать входящие</button>
+                <button id="hub-close-btn" style="background: #a63a3a; border: 1px solid #5a0c0c; color: #fff; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px;">Скрыть</button>
+            </div>
+        </div>
+        <div style="background: #3b2812; padding: 8px 15px; display: flex; gap: 8px; border-bottom: 1px solid #5a3b0c;">
+            <button class="hub-tab-btn" data-tab="incomings" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; font-weight: bold; cursor: pointer; border-radius: 3px;">Входящие</button>
+            <button class="hub-tab-btn" data-tab="timecoords" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; cursor: pointer; border-radius: 3px;">Тайм-коры</button>
+            <button class="hub-tab-btn" data-tab="plan" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; cursor: pointer; border-radius: 3px;">План (<span id="plan-count">${plannedOrders.length}</span>)</button>
+        </div>
+        <div id="hub-body" style="padding: 15px; background: #f4e4bc; color: #2b1d0c; flex-grow: 1; overflow-y: auto; min-height: 420px;">
+            <div id="tab-pane-incomings" class="hub-pane" style="display:none;"></div>
+            <div id="tab-pane-timecoords" class="hub-pane" style="display:none;"></div>
+            <div id="tab-pane-plan" class="hub-pane" style="display:none;"></div>
+        </div>
+        <div style="background: #1a1006; padding: 5px 15px; font-size: 11px; color: #a98a5c; border-top: 1px solid #7d510f; display: flex; justify-content: space-between;">
+            <span id="hub-status">Статус: Готов к работе</span>
+            <span>Мир: ru106</span>
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+    document.getElementById('hub-close-btn').onclick = () => { panel.style.display = 'none'; };
+
+    function initStaticPanes() {
+        renderTimeCoordsTab(document.getElementById('tab-pane-timecoords'));
+        renderPlanTab(document.getElementById('tab-pane-plan'));
+    }
+
+    function switchTab(tabName, saveToStorage = true) {
+        currentActiveTab = tabName;
+        if (saveToStorage) {
+            localStorage.setItem('tw_hub_active_tab', tabName);
+        }
+
+        document.querySelectorAll('.hub-tab-btn').forEach(b => {
+            b.style.background = '#2b1d0c';
+            b.style.color = '#e3d2ab';
+        });
+        const activeBtn = document.querySelector(`[data-tab="${tabName}"]`);
+        if (activeBtn) {
+            activeBtn.style.background = '#e3d2ab';
+            activeBtn.style.color = '#2b1d0c';
+        }
+
+        document.querySelectorAll('.hub-pane').forEach(pane => {
+            pane.style.display = 'none';
+        });
+
+        const targetPane = document.getElementById(`tab-pane-${tabName}`);
+        if (targetPane) {
+            targetPane.style.display = 'block';
+        }
+
+        if (tabName === 'plan') {
+            renderPlanTab(targetPane);
+        } else if (tabName === 'incomings' && !incCache.attacks) {
+            document.getElementById('hub-scan-btn').click();
+        }
+    }
+
+    document.querySelectorAll('.hub-tab-btn').forEach(btn => {
+        btn.onclick = function() {
+            switchTab(this.getAttribute('data-tab'));
+        };
+    });
+
+    function renderPlanTab(container) {
+        let freshPlans = localStorage.getItem('tw_hub_planned_orders');
+        if (freshPlans) plannedOrders = JSON.parse(freshPlans);
+        
+        plannedOrders.sort((a, b) => (a.sendMs || 0) - (b.sendMs || 0));
+
+        if (plannedOrders.length === 0) {
+            container.innerHTML = `<div style="text-align: center; color: #555; margin-top: 50px; font-weight: bold;">Список запланированных приказов пуст.<br>Добавьте их из «Входящих» или вкладки «Тайм-коры».</div>`;
+            return;
+        }
+
+        const nowMs = new Date().getTime();
+        let html = `<p style="font-weight: bold; margin-bottom: 10px; color: #5a2d0c;">Запланированные отправки (${plannedOrders.length}, отсортировано по времени):</p>`;
+        
+        plannedOrders.forEach((order, idx) => {
+            const isOverdue = (order.sendMs || 0) < nowMs;
+            const borderColor = isOverdue ? '#b22222' : '#c19a5b';
+            const borderWidth = isOverdue ? '2px' : '1px';
+            const bgCol = isOverdue ? '#fae6e6' : '#fff';
+            const overdueTag = isOverdue ? `<span style="background: #b22222; color: #fff; padding: 1px 4px; border-radius: 2px; font-size: 9px; margin-left: 5px; font-weight: bold;">ПРОСРОЧЕНО</span>` : '';
+            
+            const sourceType = order.sourceType || 'Входящие';
+            const badgeBg = sourceType === 'Входящие' ? '#336699' : '#8b4513';
+            const sourceBadge = `<span style="background: ${badgeBg}; color: #fff; padding: 1px 5px; border-radius: 2px; font-size: 9px; margin-right: 6px; font-weight: bold;">${sourceType}</span>`;
+
+            html += `
+                <div style="background: ${bgCol}; border: ${borderWidth} solid ${borderColor}; padding: 10px; margin-bottom: 8px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                    <div>
+                        ${sourceBadge}<b>#${idx + 1}</b> | Деревня: <b>${order.origin}</b> → Цель: <b>${order.target}</b> ${overdueTag}<br>
+                        <span style="margin-left: 50px;">Войска: <span style="color: #000; font-weight: bold;">${order.unitsSummary}</span> | Время отправки: <span style="color: #b22222; font-weight: bold;">${order.sendTime}</span></span>
+                    </div>
+                    <div>
+                        <a href="${order.link}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 3px 8px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; margin-right: 5px;">Перейти</a>
+                        <button class="del-plan-btn" data-idx="${idx}" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 3px 6px; cursor: pointer; border-radius: 2px; font-weight: bold;">Удалить</button>
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+
+        container.querySelectorAll('.del-plan-btn').forEach(delBtn => {
+            delBtn.onclick = function() {
+                const idx = this.getAttribute('data-idx');
+                plannedOrders.splice(idx, 1);
+                savePlans();
+                renderPlanTab(container);
+            };
+        });
+    }
+
+    function getDistance(coord1, coord2) {
+        if (!coord1 || !coord2) return 10;
+        let [x1, y1] = coord1.split('|').map(Number);
+        let [x2, y2] = coord2.split('|').map(Number);
+        return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2));
+    }
+
+    function parseArrivalTime(arrivalStr) {
+        const now = new Date();
+        let targetDate = new Date(now.getTime());
+        
+        let match = arrivalStr.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+        if (match) {
+            let day = parseInt(match[1]);
+            let month = parseInt(match[2]) - 1;
+            let year = parseInt(match[3]);
+            let hours = parseInt(match[4]);
+            let minutes = parseInt(match[5]);
+            let seconds = parseInt(match[6]);
+            targetDate = new Date(year, month, day, hours, minutes, seconds);
+        } else {
+            let timeMatch = arrivalStr.match(/(\d{2}):(\d{2}):(\d{2})(?::(\d{3}))?/);
+            if (timeMatch) {
+                let hours = parseInt(timeMatch[1]);
+                let minutes = parseInt(timeMatch[2]);
+                let seconds = parseInt(timeMatch[3]);
+                let ms = timeMatch[4] ? parseInt(timeMatch[4]) : 0;
+                targetDate.setHours(hours, minutes, seconds, ms);
+                if (arrivalStr.includes('завтра')) {
+                    targetDate.setDate(targetDate.getDate() + 1);
+                }
+            }
+        }
+        return targetDate;
+    }
+
+    function renderTimeCoordsTab(container) {
+        container.innerHTML = `
+            <div style="margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label style="font-weight: bold; font-size: 11px; color: #5a2d0c;">Целевые координаты (текстом, в строку или столбиком):</label>
+                    <button id="tc-clear-targets-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 8px; font-size: 10px; font-weight: bold; cursor: pointer; border-radius: 2px;">Очистить</button>
+                </div>
+                <textarea id="tc-targets-input" placeholder="Вставьте координаты целей (например: 500|400 501|401)" style="width: 100%; height: 50px; font-size: 11px; border: 1px solid #7d510f; padding: 5px; background: #fff; box-sizing: border-box;">${savedTcTargets}</textarea>
+            </div>
+            
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                    <label style="font-weight: bold; font-size: 11px; color: #5a2d0c; display: block; margin-bottom: 4px;">Общее время прихода для НОВЫХ целей (ДД.ММ.ГГГГ ЧЧ:ММ:СС):</label>
+                    <input type="text" id="tc-arrival-input" value="${savedTcArrival}" style="width: 100%; font-size: 11px; border: 1px solid #7d510f; padding: 5px; background: #fff; box-sizing: border-box;">
+                </div>
+                <div style="width: 110px;">
+                    <label style="font-weight: bold; font-size: 11px; color: #5a2d0c; display: block; margin-bottom: 4px;">Лимит на цель:</label>
+                    <input type="number" id="tc-max-per-target" value="${savedMaxTarget}" min="1" max="10" style="width: 100%; font-size: 11px; border: 1px solid #7d510f; padding: 5px; background: #fff; text-align: center; box-sizing: border-box;">
+                </div>
+                <div style="width: 110px;">
+                    <label style="font-weight: bold; font-size: 11px; color: #5a2d0c; display: block; margin-bottom: 4px;">Лимит с источника:</label>
+                    <input type="number" id="tc-max-per-source" value="${savedMaxSource}" min="1" max="10" style="width: 100%; font-size: 11px; border: 1px solid #7d510f; padding: 5px; background: #fff; text-align: center; box-sizing: border-box;">
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                <button id="tc-generate-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 6px 15px; cursor: pointer; border-radius: 3px; flex: 2; font-size: 12px;">Рассчитать тайм-коры (добавить новые)</button>
+                <button id="tc-refresh-btn" style="background: #8fa876; border: 1px solid #3c522b; color: #1a2b0c; font-weight: bold; padding: 6px 15px; cursor: pointer; border-radius: 3px; flex: 1; font-size: 12px;">Обновить всё время</button>
+            </div>
+
+            <div id="tc-results-area" style="font-size: 11px; color: #333;">
+                <p style="text-align: center; color: #555; margin-top: 30px;">Введите координаты целей, настройте время и лимиты, затем нажмите расчет.</p>
+            </div>
+        `;
+
+        const targetsInput = container.querySelector('#tc-targets-input');
+        const arrivalInput = container.querySelector('#tc-arrival-input');
+        const maxTargetInput = container.querySelector('#tc-max-per-target');
+        const maxSourceInput = container.querySelector('#tc-max-per-source');
+
+        targetsInput.oninput = function() {
+            savedTcTargets = this.value;
+            localStorage.setItem('tw_hub_tc_targets', savedTcTargets);
+        };
+        arrivalInput.oninput = function() {
+            savedTcArrival = this.value;
+            localStorage.setItem('tw_hub_tc_arrival', savedTcArrival);
+        };
+        maxTargetInput.oninput = function() {
+            savedMaxTarget = this.value;
+            localStorage.setItem('tw_hub_tc_max_target', savedMaxTarget);
+        };
+        maxSourceInput.oninput = function() {
+            savedMaxSource = this.value;
+            localStorage.setItem('tw_hub_tc_max_source', savedMaxSource);
+        };
+
+        container.querySelector('#tc-clear-targets-btn').onclick = function() {
+            targetsInput.value = '';
+            savedTcTargets = '';
+            localStorage.setItem('tw_hub_tc_targets', '');
+            targetsInput.focus();
+        };
+
+        const runCalculation = async (isFullRefresh = false) => {
+            const targetsText = targetsInput.value;
+            const arrivalStr = arrivalInput.value;
+            const maxPerTarget = parseInt(maxTargetInput.value) || 1;
+            const maxPerSource = parseInt(maxSourceInput.value) || 1;
+            const resultsArea = container.querySelector('#tc-results-area');
+            const status = document.getElementById('hub-status');
+
+            const rawCoords = targetsText.match(/\d{1,3}\|\d{1,3}/g);
+            if (!rawCoords || rawCoords.length === 0) {
+                resultsArea.innerHTML = `<div style="color: #b22222; font-weight: bold; text-align: center; margin-top: 20px;">Не найдены валидные координаты в поле ввода!</div>`;
+                return;
+            }
+
+            const targets = [...new Set(rawCoords)];
+            const arrivalDate = parseArrivalTime(arrivalStr);
+            const arrivalMs = arrivalDate.getTime();
+            tcCache.arrivalDateMs = arrivalMs;
+
+            let oldPairsMap = new Map();
+            if (tcCache.selectedPairs) {
+                tcCache.selectedPairs.forEach(p => {
+                    oldPairsMap.set(`${p.vil.coords}_${p.target}`, p);
+                });
+            }
+
+            status.innerText = 'Статус: Загрузка деревень и войск с сервера...';
+            let playerVillages = [];
+            try {
+                const response = await fetch('/game.php?screen=overview_villages&mode=units');
+                const htmlText = await response.text();
+                const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+                
+                doc.querySelectorAll('tr').forEach((row) => {
+                    const rowText = row.innerText.toLowerCase();
+                    if (rowText.includes('итого') || rowText.includes('всего') || rowText.includes('total') || !rowText.trim()) return;
+                    const cols = row.querySelectorAll('td');
+                    if (cols.length > 0 && cols[0].innerText.toLowerCase().includes('всего')) return;
+
+                    const link = row.querySelector('a[href*="village="]');
+                    const matchCoord = row.innerText.match(/\d+\|\d+/);
+
+                    if (link && matchCoord) {
+                        const matchId = link.getAttribute('href').match(/village=(\d+)/);
+                        if (matchId) {
+                            let cleanUnits = [];
+                            cols.forEach(col => {
+                                let text = col.innerText.trim();
+                                if (/^\d+$/.test(text) && text.length < 7) cleanUnits.push(text);
+                            });
+                            while(cleanUnits.length < 9) cleanUnits.push('0');
+
+                            if (!playerVillages.some(v => v.id === matchId[1])) {
+                                playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, 9) });
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Ошибка загрузки деревень:', e);
+            }
+
+            if (playerVillages.length === 0 && typeof game_data !== 'undefined') {
+                playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
+            }
+
+            status.innerText = `Статус: Расчет тайм-коров (${targets.length} целей)...`;
+            let allPairs = [];
+            playerVillages.forEach(vil => {
+                let totalTroops = 0;
+                for (let u = 0; u < 9; u++) totalTroops += parseInt(vil.units[u] || 0);
+                if (totalTroops === 0 || plannedOrders.some(o => o.origin === vil.coords)) return;
+
+                targets.forEach(target => {
+                    if (vil.coords === target) return;
+                    let key = `${vil.coords}_${target}`;
+                    let existingPair = oldPairsMap.get(key);
+
+                    if (existingPair && !isFullRefresh) {
+                        let targetArrMs = arrivalMs;
+                        if (existingPair.lockTime && existingPair.indivArrStr) {
+                            let parsedDate = parseArrivalTime(existingPair.indivArrStr);
+                            if (!isNaN(parsedDate.getTime())) targetArrMs = parsedDate.getTime();
+                        } else {
+                            existingPair.indivArrStr = arrivalStr;
+                        }
+                        let mSpeed = 0;
+                        existingPair.currentUnits.forEach((val, u) => {
+                            if (unitFilterStates[u] && (parseInt(val) || 0) > 0 && unitSpeeds[u] > mSpeed) mSpeed = unitSpeeds[u];
+                        });
+                        existingPair.sendMs = targetArrMs - (Math.round(getDistance(vil.coords, target) * mSpeed) * 1000);
+                        allPairs.push(existingPair);
+                        oldPairsMap.delete(key);
+                        return;
+                    }
+
+                    const dist = getDistance(vil.coords, target);
+                    let maxSpeed = 0;
+                    for (let u = 0; u < 9; u++) {
+                        if (parseInt(vil.units[u] || 0) > 0 && unitSpeeds[u] > maxSpeed) maxSpeed = unitSpeeds[u];
+                    }
+                    let sendMs = arrivalMs - (Math.round(dist * maxSpeed) * 1000);
+
+                    if (sendMs >= new Date().getTime()) {
+                        let newPair = {
+                            vil: vil, target: target, dist: dist, maxSpeed: maxSpeed, sendMs: sendMs,
+                            currentUnits: [...vil.units], sliderVal: 100, sigVal: '0',
+                            indivArrStr: arrivalStr, lockTime: false
+                        };
+                        if (existingPair && isFullRefresh) {
+                            if (existingPair.lockTime && existingPair.indivArrStr) {
+                                newPair.indivArrStr = existingPair.indivArrStr;
+                                newPair.lockTime = true;
+                            }
+                            newPair.sliderVal = existingPair.sliderVal;
+                            newPair.sigVal = existingPair.sigVal;
+                            newPair.currentUnits = [...existingPair.currentUnits];
+                            let targetArrMs = arrivalMs;
+                            if (newPair.lockTime) {
+                                let parsedDate = parseArrivalTime(newPair.indivArrStr);
+                                if (!isNaN(parsedDate.getTime())) targetArrMs = parsedDate.getTime();
+                            }
+                            let mSpeed = 0;
+                            newPair.currentUnits.forEach((val, u) => {
+                                if (unitFilterStates[u] && (parseInt(val) || 0) > 0 && unitSpeeds[u] > mSpeed) mSpeed = unitSpeeds[u];
+                            });
+                            newPair.sendMs = targetArrMs - (Math.round(dist * mSpeed) * 1000);
+                        }
+                        allPairs.push(newPair);
+                    }
+                });
+            });
+
+            oldPairsMap.forEach(pair => allPairs.push(pair));
+            allPairs.sort((a, b) => a.sendMs - b.sendMs);
+
+            let targetCounts = {}, sourceCounts = {}, selectedPairs = [];
+            allPairs.forEach(pair => {
+                let t = pair.target, s = pair.vil.coords;
+                targetCounts[t] = targetCounts[t] || 0;
+                sourceCounts[s] = sourceCounts[s] || 0;
+                if (targetCounts[t] < maxPerTarget && sourceCounts[s] < maxPerSource) {
+                    targetCounts[t]++; sourceCounts[s]++;
+                    selectedPairs.push(pair);
+                }
+            });
+
+            selectedPairs.sort((a, b) => a.sendMs - b.sendMs);
+            tcCache.selectedPairs = selectedPairs;
+            renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, arrivalStr, container);
+            status.innerText = `Статус: Готово (${selectedPairs.length} вар.)`;
+        };
+
+        container.querySelector('#tc-generate-btn').onclick = () => runCalculation(false);
+        container.querySelector('#tc-refresh-btn').onclick = () => runCalculation(true);
+
+        if (tcCache.selectedPairs && tcCache.selectedPairs.length > 0) {
+            renderTcResultsTable(tcCache.selectedPairs, container.querySelector('#tc-results-area'), tcCache.arrivalDateMs || new Date().getTime(), arrivalStr, container);
+        }
+    }
+
+    function renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, defaultArrivalStr, mainContainer) {
+        if (selectedPairs.length === 0) {
+            resultsArea.innerHTML = `<div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold;">Не удалось найти вариантов отправки с учетом лимитов и времени прихода.</div>`;
+            return;
+        }
+
+        let tableRowsHtml = '';
+        selectedPairs.forEach((pair, idx) => {
+            const vil = pair.vil;
+            let formattedTime = formatDateStr(new Date(pair.sendMs));
+            let unitInputs = '';
+            for (let u = 0; u < 9; u++) {
+                let maxVal = vil.units[u] !== undefined ? parseInt(vil.units[u]) : 0;
+                let curVal = pair.currentUnits[u] !== undefined ? pair.currentUnits[u] : maxVal;
+                unitInputs += `
+                    <td style="padding: 4px; border-right: 1px solid #e2d2b5;">
+                        <input type="text" class="tc-unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${curVal}" style="width: 32px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                        <br><span style="font-size: 9px; color: #555;">макс ${maxVal}</span>
+                    </td>
+                `;
+            }
+
+            tableRowsHtml += `
+                <tr class="tc-row" data-pair-idx="${idx}" data-send-ms="${pair.sendMs}" style="border-bottom: 1px solid #ddd; background: ${idx % 2 === 0 ? '#fff' : '#fdf8ed'}; text-align: center;">
+                    <td style="padding: 6px; font-weight: bold; border-right: 1px solid #e2d2b5; text-align: left; padding-left: 8px;">
+                        ${vil.coords} → <span style="color: #5a2d0c;">${pair.target}</span><br>
+                        <div style="display: flex; align-items: center; gap: 4px; margin-top: 3px;">
+                            <input type="range" class="tc-vil-slider" min="0" max="100" value="${pair.sliderVal}" style="width: 60px; height: 10px;">
+                            <span style="font-size: 9px; color: #555;" class="tc-slider-val">${pair.sliderVal}%</span>
+                        </div>
+                    </td>
+                    ${unitInputs}
+                    <td style="padding: 4px; border-right: 1px solid #e2d2b5;">
+                        <input type="text" class="tc-sig-input-val" value="${pair.sigVal}" style="width: 24px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                    </td>
+                    <td style="padding: 4px; border-right: 1px solid #e2d2b5; font-size: 10px;">
+                        <div style="font-size: 9px; color: #555; margin-bottom: 2px; display: flex; align-items: center; justify-content: center; gap: 3px;">
+                            <span>Приход:</span>
+                            <label style="cursor: pointer; display: flex; align-items: center;">
+                                <input type="checkbox" class="tc-lock-time-chk" ${pair.lockTime ? 'checked' : ''} style="cursor: pointer; width: 11px; height: 11px; margin: 0;">
+                            </label>
+                        </div>
+                        <input type="text" class="tc-indiv-arr-input" value="${pair.indivArrStr}" style="width: 112px; font-size: 9px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                    </td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="tc-col-time">${formattedTime}</td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="tc-col-timer">00:00:00</td>
+                    <td style="padding: 6px; white-space: nowrap;">
+                        <a href="/game.php?village=${vil.id}&screen=place&target=${pair.target}" target="_blank" class="tc-goto" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 5px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <button class="tc-plan-single" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
+                        <button class="tc-del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        let headerUnitsHtml = '';
+        for(let u=0; u<9; u++) {
+            headerUnitsHtml += `
+                <th style="padding: 5px; border-right: 1px solid #c19a5b;">
+                    <div>${unitNames[u]}</div>
+                    <input type="checkbox" class="tc-unit-filter-chk" data-unit-idx="${u}" ${unitFilterStates[u] ? 'checked' : ''} style="cursor: pointer; margin-top: 2px;">
+                </th>
+            `;
+        }
+
+        resultsArea.innerHTML = `
+            <div style="font-weight: bold; margin-bottom: 8px; color: #5a2d0c;">Найдено вариантов: ${selectedPairs.length}</div>
+            <div style="overflow-x: auto; max-height: 380px; border: 1px solid #7d510f;">
+                <table id="tc-options-table" style="width: 100%; border-collapse: collapse; background: #fff; font-size: 10px; text-align: center;">
+                    <tr style="background: #d4bc8c; border-bottom: 2px solid #7d510f; font-weight: bold; position: sticky; top: 0; z-index: 5;">
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b; width: 105px;">Источник → Цель</th>
+                        ${headerUnitsHtml}
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Сиг</th>
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Время прихода</th>
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Время отправки</th>
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Таймер</th>
+                        <th style="padding: 5px;">Действие</th>
+                    </tr>
+                    ${tableRowsHtml}
+                </table>
+            </div>
+        `;
+
+        resultsArea.querySelectorAll('.tc-unit-filter-chk').forEach(chk => {
+            chk.onchange = function() {
+                unitFilterStates[this.getAttribute('data-unit-idx')] = this.checked;
+                localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
+                resultsArea.querySelectorAll('.tc-row').forEach(r => recalculateTcRow(r, selectedPairs, arrivalMs));
+            };
+        });
+
+        if (window.tcTimerInterval) clearInterval(window.tcTimerInterval);
+        window.tcTimerInterval = setInterval(() => {
+            const now = new Date().getTime();
+            document.querySelectorAll('.tc-row').forEach(row => {
+                let diffSec = Math.round((parseInt(row.dataset.sendMs || 0) - now) / 1000);
+                let timerElem = row.querySelector('.tc-col-timer');
+                if (!timerElem) return;
+                if (diffSec <= 0) {
+                    timerElem.innerText = "00:00:00"; timerElem.style.color = "#008000";
+                } else {
+                    let h = Math.floor(diffSec / 3600).toString().padStart(2, '0');
+                    let m = Math.floor((diffSec % 3600) / 60).toString().padStart(2, '0');
+                    let s = (diffSec % 60).toString().padStart(2, '0');
+                    timerElem.innerText = `${h}:${m}:${s}`; timerElem.style.color = "#b22222";
+                }
+            });
+        }, 1000);
+
+        resultsArea.querySelectorAll('.tc-row').forEach(row => {
+            const pIdx = parseInt(row.getAttribute('data-pair-idx'));
+            let pair = selectedPairs[pIdx];
+            const slider = row.querySelector('.tc-vil-slider');
+            const inputs = row.querySelectorAll('.tc-unit-input-val');
+            const sliderValLabel = row.querySelector('.tc-slider-val');
+            const indivInp = row.querySelector('.tc-indiv-arr-input');
+            const sigInp = row.querySelector('.tc-sig-input-val');
+            const lockChk = row.querySelector('.tc-lock-time-chk');
+
+            sigInp.oninput = function() { pair.sigVal = this.value; };
+            lockChk.onchange = function() { pair.lockTime = this.checked; };
+            indivInp.oninput = function() { pair.indivArrStr = this.value; };
+            indivInp.onchange = function() {
+                pair.indivArrStr = this.value; pair.lockTime = true; lockChk.checked = true;
+                recalculateTcRow(row, selectedPairs, arrivalMs);
+            };
+
+            slider.oninput = function() {
+                let percent = parseInt(this.value);
+                pair.sliderVal = percent;
+                sliderValLabel.innerText = percent + '%';
+                inputs.forEach((inp, u) => {
+                    let val = Math.round((parseInt(inp.getAttribute('data-max')) * percent) / 100);
+                    inp.value = val; pair.currentUnits[u] = val;
+                });
+                recalculateTcRow(row, selectedPairs, arrivalMs);
+            };
+
+            inputs.forEach(inp => { inp.oninput = () => recalculateTcRow(row, selectedPairs, arrivalMs); });
+            
+            row.querySelector('.tc-del-row-btn').onclick = function() {
+                selectedPairs.splice(pIdx, 1);
+                renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, defaultArrivalStr, mainContainer);
+            };
+
+            row.querySelector('.tc-plan-single').onclick = function() {
+                let unitsSummary = [];
+                inputs.forEach(inp => { if(parseInt(inp.value) > 0) unitsSummary.push(inp.value); });
+                
+                let fresh = localStorage.getItem('tw_hub_planned_orders');
+                if (fresh) plannedOrders = JSON.parse(fresh);
+
+                plannedOrders.push({
+                    origin: pair.vil.coords, target: pair.target,
+                    sendTime: row.querySelector('.tc-col-time').innerText,
+                    unitsSummary: `[${unitsSummary.join('/')}]`,
+                    link: row.querySelector('.tc-goto').getAttribute('href'),
+                    sendMs: pair.sendMs, sourceType: 'Тайм-кор'
+                });
+                savePlans();
+                renderPlanTab(document.getElementById('tab-pane-plan'));
+                this.style.background = '#2e7d32'; this.style.color = '#fff'; this.innerText = 'Запланировано';
+            };
+        });
+    }
+
+    function recalculateTcRow(row, selectedPairs, arrivalMs) {
+        const pIdx = parseInt(row.getAttribute('data-pair-idx'));
+        let pair = selectedPairs[pIdx];
+        if (!pair) return;
+
+        let targetArrivalMs = arrivalMs;
+        const indivInp = row.querySelector('.tc-indiv-arr-input');
+        if (indivInp && indivInp.value) {
+            let parsedDate = parseArrivalTime(indivInp.value);
+            if (!isNaN(parsedDate.getTime())) targetArrivalMs = parsedDate.getTime();
+        }
+
+        let maxUnitSpeed = 0;
+        row.querySelectorAll('.tc-unit-input-val').forEach((inp, u) => {
+            pair.currentUnits[u] = inp.value;
+            if (unitFilterStates[u] && (parseInt(inp.value) || 0) > 0 && unitSpeeds[u] > maxUnitSpeed) {
+                maxUnitSpeed = unitSpeeds[u];
+            }
+        });
+
+        let sendTimeMs = targetArrivalMs - (Math.round(getDistance(pair.vil.coords, pair.target) * maxUnitSpeed) * 1000);
+        row.querySelector('.tc-col-time').innerText = formatDateStr(new Date(sendTimeMs));
+        row.dataset.sendMs = sendTimeMs;
+        pair.sendMs = sendTimeMs;
+    }
+
+    function renderIncomingsList(container, attacks) {
+        let html = `<p style="font-weight: bold; margin-bottom: 10px;">Активные входящие атаки (${attacks.length}):</p>`;
+        attacks.forEach(att => {
+            html += `
+                <div style="background: #fff; border: 1px solid #c19a5b; padding: 10px; margin-bottom: 8px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-weight: bold; font-size: 12px; color: #5a2d0c; margin-bottom: 3px;">🛡️ #${att.id} | ${att.type} • Цель: ${att.target}</div>
+                        <div style="font-size: 11px; color: #666;">Откуда: <b>${att.origin}</b> | Прибытие: <span style="color: #b22222; font-weight: bold;">${att.arrival}</span></div>
+                    </div>
+                    <div>
+                        <button class="open-srez-btn" data-id="${att.id}" style="background: #e3d2ab; border: 1px solid #7d510f; font-weight: bold; font-size: 11px; padding: 5px 10px; cursor: pointer; border-radius: 3px;">Срез / Перехват</button>
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+
+        container.querySelectorAll('.open-srez-btn').forEach(btn => {
+            btn.onclick = function() {
+                const attId = this.getAttribute('data-id');
+                const selectedAttack = attacks.find(a => a.id == attId);
+                incCache.selectedAttack = selectedAttack;
+                
+                let availableOptions = [];
+                incCache.playerVillages.forEach((vil) => {
+                    let totalTroops = 0;
+                    for (let u = 0; u < 9; u++) totalTroops += (parseInt(vil.units[u]) || 0);
+                    if (totalTroops === 0 || plannedOrders.some(o => o.origin === vil.coords)) return;
+
+                    let maxPossibleSpeed = 0;
+                    for (let u = 0; u < 9; u++) {
+                        if ((parseInt(vil.units[u]) || 0) > 0 && unitSpeeds[u] > maxPossibleSpeed) maxPossibleSpeed = unitSpeeds[u];
+                    }
+                    let initialSendMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(vil.coords, selectedAttack.target) * maxPossibleSpeed) * 1000);
+
+                    if (initialSendMs >= new Date().getTime()) {
+                        availableOptions.push({ vil: vil, sendMs: initialSendMs, currentUnits: [...vil.units], sliderVal: 100, sigVal: '0' });
+                    }
+                });
+                availableOptions.sort((a, b) => a.sendMs - b.sendMs);
+                incCache.availableOptions = availableOptions;
+                renderSrezView(container, selectedAttack, availableOptions);
+            };
+        });
+    }
+
+    document.getElementById('hub-scan-btn').onclick = async function() {
+        switchTab('incomings');
+        const container = document.getElementById('tab-pane-incomings');
+        const status = document.getElementById('hub-status');
+        status.innerText = 'Статус: Загрузка входящих атак...';
+        
+        let attacks = [];
+        try {
+            const response = await fetch('/game.php?screen=overview_villages&mode=incomings');
+            const htmlText = await response.text();
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            const rows = doc.querySelectorAll('#incomings_table tr.nowrap, tr.row_marker');
+            
+            if (!rows || rows.length === 0) {
+                container.innerHTML = `<div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold;"><p>Входящие атаки не найдены!</p></div>`;
+                status.innerText = 'Статус: Входящих нет';
+                return;
+            }
+
+            const nowMs = new Date().getTime();
+            rows.forEach((row, index) => {
+                const cols = row.querySelectorAll('td');
+                if (cols.length >= 6) {
+                    const type = cols[0].innerText.trim() || 'Атака';
+                    const targetText = cols[1].innerText.trim();
+                    const originElem = cols[2].querySelector('a');
+                    const originText = originElem ? originElem.innerText.trim() : cols[2].innerText.trim();
+                    const arrival = cols[5].innerText.trim();
+                    const arrivalDate = parseArrivalTime(arrival);
+
+                    if (arrivalDate.getTime() > nowMs) {
+                        attacks.push({ 
+                            id: index + 1, type: type.replace(/\s+/g, ' '), 
+                            target: targetText.match(/\d+\|\d+/) ? targetText.match(/\d+\|\d+/)[0] : targetText, 
+                            origin: originText.match(/\d+\|\d+/) ? originText.match(/\d+\|\d+/) [0] : '000|000', 
+                            arrival, arrivalDate
+                        });
+                    }
+                }
+            });
+        } catch (e) {
+            container.innerHTML = `<div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold;">Ошибка при загрузке входящих.</div>`;
+            status.innerText = 'Статус: Ошибка';
+            return;
+        }
+
+        status.innerText = 'Статус: Загрузка войск...';
+        let playerVillages = [];
+        try {
+            const response = await fetch('/game.php?screen=overview_villages&mode=units');
+            const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+            doc.querySelectorAll('tr').forEach((row) => {
+                const rowText = row.innerText.toLowerCase();
+                if (rowText.includes('итого') || rowText.includes('всего') || !rowText.trim()) return;
+                const cols = row.querySelectorAll('td');
+                const link = row.querySelector('a[href*="village="]');
+                const matchCoord = row.innerText.match(/\d+\|\d+/);
+
+                if (link && matchCoord) {
+                    let matchId = link.getAttribute('href').match(/village=(\d+)/);
+                    if (matchId) {
+                        let cleanUnits = [];
+                        cols.forEach(col => {
+                            let text = col.innerText.trim();
+                            if (/^\d+$/.test(text) && text.length < 7) cleanUnits.push(text);
+                        });
+                        while(cleanUnits.length < 9) cleanUnits.push('0');
+                        if (!playerVillages.some(v => v.id === matchId[1])) {
+                            playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, 9) });
+                        }
+                    }
+                }
+            });
+        } catch (e) {}
+
+        if (playerVillages.length === 0 && typeof game_data !== 'undefined') {
+            playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
+        }
+
+        incCache.attacks = attacks;
+        incCache.playerVillages = playerVillages;
+        status.innerText = `Статус: Атак: ${attacks.length} | Деревень: ${playerVillages.length}`;
+        renderIncomingsList(container, attacks);
+    };
+
+    function renderSrezView(container, selectedAttack, availableOptions) {
+        if (availableOptions.length === 0) {
+            container.innerHTML = `
+                <div style="margin-bottom: 8px;"><button id="back-to-list" style="background: #d4bc8c; border: 1px solid #7d510f; font-size: 11px; padding: 4px 10px; font-weight: bold; cursor: pointer;">← Назад</button></div>
+                <div style="padding: 30px; text-align: center; color: #b22222; font-weight: bold;">Нет доступных деревень для перехвата.</div>
+            `;
+            container.querySelector('#back-to-list').onclick = () => renderIncomingsList(container, incCache.attacks);
+            return;
+        }
+
+        let tableRowsHtml = '';
+        availableOptions.forEach((opt, idx) => {
+            const vil = opt.vil;
+            let unitInputs = '';
+            for (let u = 0; u < 9; u++) {
+                let maxVal = parseInt(vil.units[u]) || 0;
+                unitInputs += `
+                    <td style="padding: 4px; border-right: 1px solid #e2d2b5;">
+                        <input type="text" class="unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${opt.currentUnits[u]}" style="width: 32px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                        <br><span style="font-size: 9px; color: #555;">макс ${maxVal}</span>
+                    </td>
+                `;
+            }
+
+            tableRowsHtml += `
+                <tr class="vil-row" data-opt-idx="${idx}" data-arrival-ms="${selectedAttack.arrivalDate.getTime()}" data-send-ms="${opt.sendMs}" style="border-bottom: 1px solid #ddd; background: ${idx % 2 === 0 ? '#fff' : '#fdf8ed'}; text-align: center;">
+                    <td style="padding: 6px; font-weight: bold; border-right: 1px solid #e2d2b5; text-align: left; padding-left: 8px;">
+                        ${vil.coords}<br>
+                        <div style="display: flex; align-items: center; gap: 4px; margin-top: 3px;">
+                            <input type="range" class="vil-slider" min="0" max="100" value="${opt.sliderVal}" style="width: 60px; height: 10px;">
+                            <span style="font-size: 9px; color: #555;" class="slider-val">${opt.sliderVal}%</span>
+                        </div>
+                    </td>
+                    ${unitInputs}
+                    <td style="padding: 4px; border-right: 1px solid #e2d2b5;"><input type="text" class="sig-input-val" value="${opt.sigVal}" style="width: 24px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;"></td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="col-time">${formatDateStr(new Date(opt.sendMs))}</td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="col-timer">00:00:00</td>
+                    <td style="padding: 6px; white-space: nowrap;">
+                        <a href="/game.php?village=${vil.id}&screen=place&target=${selectedAttack.target}" target="_blank" class="goto-link" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 6px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <button class="plan-single-btn" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
+                        <button class="del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        let headerUnitsHtml = '';
+        for(let u=0; u<9; u++) {
+            headerUnitsHtml += `
+                <th style="padding: 5px; border-right: 1px solid #c19a5b;">
+                    <div>${unitNames[u]}</div>
+                    <input type="checkbox" class="unit-filter-chk" data-unit-idx="${u}" ${unitFilterStates[u] ? 'checked' : ''} style="cursor: pointer; margin-top: 2px;">
+                </th>
+            `;
+        }
+
+        container.innerHTML = `
+            <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                <button id="back-to-list" style="background: #d4bc8c; border: 1px solid #7d510f; font-size: 11px; padding: 4px 10px; font-weight: bold; cursor: pointer;">← Назад к списку атак</button>
+                <span style="font-size: 11px; color: #5a2d0c; font-weight: bold;">Свободных деревень: ${availableOptions.length}</span>
+            </div>
+            <div style="background: #fff; border: 2px solid #7d510f; padding: 8px 12px; margin-bottom: 10px; border-radius: 3px; font-size: 11px;">
+                <b>Атака:</b> ${selectedAttack.origin} → ${selectedAttack.target} | <b>Прибытие:</b> <span style="color: #b22222; font-weight: bold;">${selectedAttack.arrival}</span>
+            </div>
+            <div style="overflow-x: auto; max-height: 400px; border: 1px solid #7d510f;">
+                <table id="options-table" style="width: 100%; border-collapse: collapse; background: #fff; font-size: 10px; text-align: center;">
+                    <tr style="background: #d4bc8c; border-bottom: 2px solid #7d510f; font-weight: bold; position: sticky; top: 0; z-index: 5;">
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b; width: 90px;">Деревня</th>
+                        ${headerUnitsHtml}
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Сиг</th>
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Время отправки</th>
+                        <th style="padding: 5px; border-right: 1px solid #c19a5b;">Таймер</th>
+                        <th style="padding: 5px;">Приказ</th>
+                    </tr>
+                    ${tableRowsHtml}
+                </table>
+            </div>
+        `;
+
+        container.querySelector('#back-to-list').onclick = () => {
+            incCache.selectedAttack = null;
+            incCache.availableOptions = null;
+            renderIncomingsList(container, incCache.attacks);
+        };
+
+        container.querySelectorAll('.unit-filter-chk').forEach(chk => {
+            chk.onchange = function() {
+                unitFilterStates[this.getAttribute('data-unit-idx')] = this.checked;
+                localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
+                container.querySelectorAll('.vil-row').forEach(r => recalculateRow(r, availableOptions, selectedAttack));
+            };
+        });
+
+        if (window.hubTimerInterval) clearInterval(window.hubTimerInterval);
+        window.hubTimerInterval = setInterval(() => {
+            const now = new Date().getTime();
+            container.querySelectorAll('.vil-row').forEach(row => {
+                let diffSec = Math.round((parseInt(row.dataset.sendMs || 0) - now) / 1000);
+                let timerElem = row.querySelector('.col-timer');
+                if (!timerElem) return;
+                if (diffSec <= 0) {
+                    timerElem.innerText = "00:00:00"; timerElem.style.color = "#008000";
+                } else {
+                    let h = Math.floor(diffSec / 3600).toString().padStart(2, '0');
+                    let m = Math.floor((diffSec % 3600) / 60).toString().padStart(2, '0');
+                    let s = (diffSec % 60).toString().padStart(2, '0');
+                    timerElem.innerText = `${h}:${m}:${s}`; timerElem.style.color = "#b22222";
+                }
+            });
+        }, 1000);
+
+        container.querySelectorAll('.vil-row').forEach(row => {
+            const optIdx = parseInt(row.getAttribute('data-opt-idx'));
+            let opt = availableOptions[optIdx];
+            const slider = row.querySelector('.vil-slider');
+            const inputs = row.querySelectorAll('.unit-input-val');
+            const sliderValLabel = row.querySelector('.slider-val');
+
+            row.querySelector('.sig-input-val').oninput = function() { opt.sigVal = this.value; };
+
+            slider.oninput = function() {
+                let percent = parseInt(this.value);
+                opt.sliderVal = percent; sliderValLabel.innerText = percent + '%';
+                inputs.forEach((inp, u) => {
+                    let val = Math.round((parseInt(inp.getAttribute('data-max')) * percent) / 100);
+                    inp.value = val; opt.currentUnits[u] = val;
+                });
+                recalculateRow(row, availableOptions, selectedAttack);
+            };
+
+            inputs.forEach(inp => { inp.oninput = () => recalculateRow(row, availableOptions, selectedAttack); });
+            
+            row.querySelector('.del-row-btn').onclick = function() {
+                availableOptions.splice(optIdx, 1);
+                renderSrezView(container, selectedAttack, availableOptions);
+            };
+
+            row.querySelector('.plan-single-btn').onclick = function() {
+                let unitsSummary = [];
+                inputs.forEach(inp => { if(parseInt(inp.value) > 0) unitsSummary.push(inp.value); });
+                
+                let fresh = localStorage.getItem('tw_hub_planned_orders');
+                if (fresh) plannedOrders = JSON.parse(fresh);
+
+                plannedOrders.push({
+                    origin: opt.vil.coords, target: selectedAttack.target,
+                    sendTime: row.querySelector('.col-time').innerText,
+                    unitsSummary: `[${unitsSummary.join('/')}]`,
+                    link: row.querySelector('.goto-link').getAttribute('href'),
+                    sendMs: opt.sendMs, sourceType: 'Входящие'
+                });
+                savePlans();
+                renderPlanTab(document.getElementById('tab-pane-plan'));
+                this.style.background = '#2e7d32'; this.style.color = '#fff'; this.innerText = 'Запланировано';
+            };
+        });
+    }
+
+    function recalculateRow(row, availableOptions, selectedAttack) {
+        const optIdx = parseInt(row.getAttribute('data-opt-idx'));
+        let opt = availableOptions[optIdx];
+        if (!opt) return;
+
+        let maxUnitSpeed = 0;
+        row.querySelectorAll('.unit-input-val').forEach((inp, u) => {
+            opt.currentUnits[u] = inp.value;
+            if (unitFilterStates[u] && (parseInt(inp.value) || 0) > 0 && unitSpeeds[u] > maxUnitSpeed) {
+                maxUnitSpeed = unitSpeeds[u];
+            }
+        });
+
+        let sendTimeMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(opt.vil.coords, selectedAttack.target) * maxUnitSpeed) * 1000);
+        row.querySelector('.col-time').innerText = formatDateStr(new Date(sendTimeMs));
+        row.dataset.sendMs = sendTimeMs;
+        opt.sendMs = sendTimeMs;
+    }
+
+    initStaticPanes();
+    switchTab(currentActiveTab, false);
+})();
