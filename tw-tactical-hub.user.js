@@ -1,6 +1,4 @@
-javascript:(function() {
-    'use strict';
-
+(function() {
     let existingPanel = document.getElementById('custom-tactical-hub');
     if (existingPanel) {
         if (existingPanel.style.display === 'none') {
@@ -32,6 +30,7 @@ javascript:(function() {
     let savedMaxSource = localStorage.getItem('tw_hub_tc_max_source') || '1';
 
     let currentActiveTab = localStorage.getItem('tw_hub_active_tab') || 'incomings';
+    // Если раньше были сохранены удаленные вкладки, сбрасываем на 'incomings'
     if (['hub', 'tribe', 'stats'].includes(currentActiveTab)) {
         currentActiveTab = 'incomings';
     }
