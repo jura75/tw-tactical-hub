@@ -78,7 +78,7 @@
         <div style="background: #1a1006; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f;">
             <div>
                 <b style="font-size: 14px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.18 • Fixed Speed Logic</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.22 • Fixed Target Param</span>
             </div>
             <div>
                 <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 10px; cursor: pointer; border-radius: 3px; margin-right: 5px;">Сканировать входящие</button>
@@ -87,8 +87,8 @@
         </div>
         <div style="background: #3b2812; padding: 8px 15px; display: flex; gap: 8px; border-bottom: 1px solid #5a3b0c;">
             <button class="hub-tab-btn" data-tab="incomings" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; font-weight: bold; cursor: pointer; border-radius: 3px;">Входящие</button>
-            <button class="hub-tab-btn" data-tab="timecoords" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; cursor: pointer; border-radius: 3px;">Тайм-коры</button>
-            <button class="hub-tab-btn" data-tab="plan" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; cursor: pointer; border-radius: 3px;">План (<span id="plan-count">${plannedOrders.length}</span>)</button>
+            <button class="hub-tab-btn" data-tab="timecoords" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; font-weight: bold; cursor: pointer; border-radius: 3px;">Тайм-коры</button>
+            <button class="hub-tab-btn" data-tab="plan" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 5px 12px; font-weight: bold; cursor: pointer; border-radius: 3px;">План (<span id="plan-count">${plannedOrders.length}</span>)</button>
         </div>
         <div id="hub-body" style="padding: 15px; background: #f4e4bc; color: #2b1d0c; flex-grow: 1; overflow-y: auto; min-height: 420px;">
             <div id="tab-pane-incomings" class="hub-pane" style="display:none;"></div>
@@ -476,6 +476,9 @@
         selectedPairs.forEach((pair, idx) => {
             const vil = pair.vil;
             let formattedTime = formatDateStr(new Date(pair.sendMs));
+            
+            let [tX, tY] = pair.target.split('|');
+
             let unitInputs = '';
             for (let u = 0; u < 9; u++) {
                 let maxVal = vil.units[u] !== undefined ? parseInt(vil.units[u]) : 0;
@@ -513,7 +516,7 @@
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="tc-col-time">${formattedTime}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="tc-col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
-                        <a href="/game.php?village=${vil.id}&screen=place&target=${pair.target}" target="_blank" class="tc-goto" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 5px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <a href="/game.php?village=${vil.id}&screen=place&x=${tX}&y=${tY}&input_x=${tX}&input_y=${tY}" target="_blank" class="tc-goto" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 5px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
                         <button class="tc-plan-single" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
                         <button class="tc-del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
                     </td>
@@ -806,6 +809,8 @@
             return;
         }
 
+        let [attX, attY] = selectedAttack.target.split('|');
+
         let tableRowsHtml = '';
         availableOptions.forEach((opt, idx) => {
             const vil = opt.vil;
@@ -834,7 +839,7 @@
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="col-time">${formatDateStr(new Date(opt.sendMs))}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
-                        <a href="/game.php?village=${vil.id}&screen=place&target=${selectedAttack.target}" target="_blank" class="goto-link" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 6px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <a href="/game.php?village=${vil.id}&screen=place&x=${attX}&y=${attY}&input_x=${attX}&input_y=${attY}" target="_blank" class="goto-link" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 6px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
                         <button class="plan-single-btn" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
                         <button class="del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
                     </td>
