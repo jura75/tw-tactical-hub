@@ -1,4 +1,21 @@
-(function() {
+javascript:(function() {
+    // Проверяем, находимся ли мы на странице подтверждения атаки/подкрепления
+    const isConfirmationPage = window.location.href.includes('screen=place') && (document.querySelector('#troop_confirm_submit') || document.forms['command-form'] || document.getElementById('btn_confirm'));
+
+    if (isConfirmationPage) {
+        // Если это страница подтверждения — сразу запускаем таймер с GitHub
+        fetch('https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js')
+            .then(r => r.text())
+            .then(code => {
+                try {
+                    eval(code);
+                } catch(e) { console.error('Ошибка выполнения таймера:', e); }
+            })
+            .catch(err => console.error('Не удалось загрузить таймер с GitHub:', err));
+        return; // Прерываем выполнение, чтобы Хаб не открывался
+    }
+
+    // На всех остальных страницах — работает открытие/скрытие твоего Хаба
     let existingPanel = document.getElementById('custom-tactical-hub');
     if (existingPanel) {
         if (existingPanel.style.display === 'none') {
@@ -36,6 +53,17 @@
 
     let tcCache = { selectedPairs: null, arrivalDateMs: null };
     let incCache = { attacks: null, playerVillages: null, selectedAttack: null, availableOptions: null };
+
+    function runExternalTimer() {
+        fetch('https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js')
+            .then(r => r.text())
+            .then(code => {
+                try {
+                    eval(code);
+                } catch(e) { console.error('Ошибка выполнения таймера:', e); }
+            })
+            .catch(err => console.error('Не удалось загрузить таймер с GitHub:', err));
+    }
 
     function formatDateStr(date) {
         let d = String(date.getDate()).padStart(2, '0');
@@ -78,9 +106,10 @@
         <div style="background: #1a1006; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f;">
             <div>
                 <b style="font-size: 14px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.22 • Fixed Target Param</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.25 • Smart Button</span>
             </div>
             <div>
+                <button id="hub-run-timer-btn" style="background: #4a7c59; border: 1px solid #284731; color: #fff; font-weight: bold; padding: 3px 10px; cursor: pointer; border-radius: 3px; margin-right: 5px;">⚡ Запустить таймер</button>
                 <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 10px; cursor: pointer; border-radius: 3px; margin-right: 5px;">Сканировать входящие</button>
                 <button id="hub-close-btn" style="background: #a63a3a; border: 1px solid #5a0c0c; color: #fff; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px;">Скрыть</button>
             </div>
@@ -103,6 +132,7 @@
 
     document.body.appendChild(panel);
     document.getElementById('hub-close-btn').onclick = () => { panel.style.display = 'none'; };
+    document.getElementById('hub-run-timer-btn').onclick = () => { runExternalTimer(); };
 
     function initStaticPanes() {
         renderTimeCoordsTab(document.getElementById('tab-pane-timecoords'));
@@ -179,7 +209,7 @@
                         <span style="margin-left: 50px;">Войска: <span style="color: #000; font-weight: bold;">${order.unitsSummary}</span> | Время отправки: <span style="color: #b22222; font-weight: bold;">${order.sendTime}</span></span>
                     </div>
                     <div>
-                        <a href="${order.link}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 3px 8px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; margin-right: 5px;">Перейти</a>
+                        <a href="${order.link}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 3px 8px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; margin-right: 5px; display:inline-block;">Перейти</a>
                         <button class="del-plan-btn" data-idx="${idx}" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 3px 6px; cursor: pointer; border-radius: 2px; font-weight: bold;">Удалить</button>
                     </div>
                 </div>
@@ -516,7 +546,7 @@
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="tc-col-time">${formattedTime}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="tc-col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
-                        <a href="/game.php?village=${vil.id}&screen=place&x=${tX}&y=${tY}&input_x=${tX}&input_y=${tY}" target="_blank" class="tc-goto" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 5px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <a href="/game.php?village=${vil.id}&screen=place&x=${tX}&y=${tY}&input_x=${tX}&input_y=${tY}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 5px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
                         <button class="tc-plan-single" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
                         <button class="tc-del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
                     </td>
@@ -625,7 +655,7 @@
                     origin: pair.vil.coords, target: pair.target,
                     sendTime: row.querySelector('.tc-col-time').innerText,
                     unitsSummary: `[${unitsSummary.join('/')}]`,
-                    link: row.querySelector('.tc-goto').getAttribute('href'),
+                    link: row.querySelector('a[href*="screen=place"]').getAttribute('href'),
                     sendMs: pair.sendMs, sourceType: 'Тайм-кор'
                 });
                 savePlans();
@@ -839,7 +869,7 @@
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 9px;" class="col-time">${formatDateStr(new Date(opt.sendMs))}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold;" class="col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
-                        <a href="/game.php?village=${vil.id}&screen=place&x=${attX}&y=${attY}&input_x=${attX}&input_y=${attY}" target="_blank" class="goto-link" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 6px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
+                        <a href="/game.php?village=${vil.id}&screen=place&x=${attX}&y=${attY}&input_x=${attX}&input_y=${attY}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 2px 6px; text-decoration: none; color: #333; border-radius: 2px; font-weight: bold; display:inline-block; margin-right: 2px;">Перейти</a>
                         <button class="plan-single-btn" style="background: #e3d2ab; border: 1px solid #7d510f; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px; margin-right: 2px;">Запланировать</button>
                         <button class="del-row-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 5px; font-weight: bold; border-radius: 2px; cursor: pointer; font-size: 9px;">Удалить</button>
                     </td>
@@ -949,7 +979,7 @@
                     origin: opt.vil.coords, target: selectedAttack.target,
                     sendTime: row.querySelector('.col-time').innerText,
                     unitsSummary: `[${unitsSummary.join('/')}]`,
-                    link: row.querySelector('.goto-link').getAttribute('href'),
+                    link: row.querySelector('a[href*="screen=place"]').getAttribute('href'),
                     sendMs: opt.sendMs, sourceType: 'Входящие'
                 });
                 savePlans();
