@@ -1,4 +1,4 @@
-javascript:(function() {
+(function() {
     let existingPanel = document.getElementById('custom-tactical-hub');
     if (existingPanel) {
         if (existingPanel.style.display === 'none') {
@@ -78,7 +78,7 @@ javascript:(function() {
         <div style="background: #1a1006; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f;">
             <div>
                 <b style="font-size: 14px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.17 • Clean Tabs</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 10px;">v6.9.18 • Fixed Speed Logic</span>
             </div>
             <div>
                 <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 10px; cursor: pointer; border-radius: 3px; margin-right: 5px;">Сканировать входящие</button>
@@ -383,10 +383,13 @@ javascript:(function() {
                         } else {
                             existingPair.indivArrStr = arrivalStr;
                         }
-                        let mSpeed = 0;
+                        let mSpeed = 99999;
                         existingPair.currentUnits.forEach((val, u) => {
-                            if (unitFilterStates[u] && (parseInt(val) || 0) > 0 && unitSpeeds[u] > mSpeed) mSpeed = unitSpeeds[u];
+                            let cnt = parseInt(val) || 0;
+                            if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < mSpeed) mSpeed = unitSpeeds[u];
                         });
+                        if (mSpeed === 99999) mSpeed = 1800;
+                        
                         existingPair.sendMs = targetArrMs - (Math.round(getDistance(vil.coords, target) * mSpeed) * 1000);
                         allPairs.push(existingPair);
                         oldPairsMap.delete(key);
@@ -394,15 +397,18 @@ javascript:(function() {
                     }
 
                     const dist = getDistance(vil.coords, target);
-                    let maxSpeed = 0;
+                    let minSpeed = 99999;
                     for (let u = 0; u < 9; u++) {
-                        if (parseInt(vil.units[u] || 0) > 0 && unitSpeeds[u] > maxSpeed) maxSpeed = unitSpeeds[u];
+                        let cnt = parseInt(vil.units[u] || 0);
+                        if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < minSpeed) minSpeed = unitSpeeds[u];
                     }
-                    let sendMs = arrivalMs - (Math.round(dist * maxSpeed) * 1000);
+                    if (minSpeed === 99999) minSpeed = 1800;
+
+                    let sendMs = arrivalMs - (Math.round(dist * minSpeed) * 1000);
 
                     if (sendMs >= new Date().getTime()) {
                         let newPair = {
-                            vil: vil, target: target, dist: dist, maxSpeed: maxSpeed, sendMs: sendMs,
+                            vil: vil, target: target, dist: dist, maxSpeed: minSpeed, sendMs: sendMs,
                             currentUnits: [...vil.units], sliderVal: 100, sigVal: '0',
                             indivArrStr: arrivalStr, lockTime: false
                         };
@@ -419,10 +425,12 @@ javascript:(function() {
                                 let parsedDate = parseArrivalTime(newPair.indivArrStr);
                                 if (!isNaN(parsedDate.getTime())) targetArrMs = parsedDate.getTime();
                             }
-                            let mSpeed = 0;
+                            let mSpeed = 99999;
                             newPair.currentUnits.forEach((val, u) => {
-                                if (unitFilterStates[u] && (parseInt(val) || 0) > 0 && unitSpeeds[u] > mSpeed) mSpeed = unitSpeeds[u];
+                                let cnt = parseInt(val) || 0;
+                                if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < mSpeed) mSpeed = unitSpeeds[u];
                             });
+                            if (mSpeed === 99999) mSpeed = 1800;
                             newPair.sendMs = targetArrMs - (Math.round(dist * mSpeed) * 1000);
                         }
                         allPairs.push(newPair);
@@ -636,15 +644,17 @@ javascript:(function() {
             if (!isNaN(parsedDate.getTime())) targetArrivalMs = parsedDate.getTime();
         }
 
-        let maxUnitSpeed = 0;
+        let minUnitSpeed = 99999;
         row.querySelectorAll('.tc-unit-input-val').forEach((inp, u) => {
             pair.currentUnits[u] = inp.value;
-            if (unitFilterStates[u] && (parseInt(inp.value) || 0) > 0 && unitSpeeds[u] > maxUnitSpeed) {
-                maxUnitSpeed = unitSpeeds[u];
+            let cnt = parseInt(inp.value) || 0;
+            if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < minUnitSpeed) {
+                minUnitSpeed = unitSpeeds[u];
             }
         });
+        if (minUnitSpeed === 99999) minUnitSpeed = 1800;
 
-        let sendTimeMs = targetArrivalMs - (Math.round(getDistance(pair.vil.coords, pair.target) * maxUnitSpeed) * 1000);
+        let sendTimeMs = targetArrivalMs - (Math.round(getDistance(pair.vil.coords, pair.target) * minUnitSpeed) * 1000);
         row.querySelector('.tc-col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
         pair.sendMs = sendTimeMs;
@@ -679,11 +689,16 @@ javascript:(function() {
                     for (let u = 0; u < 9; u++) totalTroops += (parseInt(vil.units[u]) || 0);
                     if (totalTroops === 0 || plannedOrders.some(o => o.origin === vil.coords)) return;
 
-                    let maxPossibleSpeed = 0;
+                    let minSpeed = 99999;
                     for (let u = 0; u < 9; u++) {
-                        if ((parseInt(vil.units[u]) || 0) > 0 && unitSpeeds[u] > maxPossibleSpeed) maxPossibleSpeed = unitSpeeds[u];
+                        let cnt = parseInt(vil.units[u]) || 0;
+                        if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < minSpeed) {
+                            minSpeed = unitSpeeds[u];
+                        }
                     }
-                    let initialSendMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(vil.coords, selectedAttack.target) * maxPossibleSpeed) * 1000);
+                    if (minSpeed === 99999) minSpeed = 1800;
+
+                    let initialSendMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(vil.coords, selectedAttack.target) * minSpeed) * 1000);
 
                     if (initialSendMs >= new Date().getTime()) {
                         availableOptions.push({ vil: vil, sendMs: initialSendMs, currentUnits: [...vil.units], sliderVal: 100, sigVal: '0' });
@@ -944,15 +959,17 @@ javascript:(function() {
         let opt = availableOptions[optIdx];
         if (!opt) return;
 
-        let maxUnitSpeed = 0;
+        let minUnitSpeed = 99999;
         row.querySelectorAll('.unit-input-val').forEach((inp, u) => {
             opt.currentUnits[u] = inp.value;
-            if (unitFilterStates[u] && (parseInt(inp.value) || 0) > 0 && unitSpeeds[u] > maxUnitSpeed) {
-                maxUnitSpeed = unitSpeeds[u];
+            let cnt = parseInt(inp.value) || 0;
+            if (unitFilterStates[u] && cnt > 0 && unitSpeeds[u] < minUnitSpeed) {
+                minUnitSpeed = unitSpeeds[u];
             }
         });
+        if (minUnitSpeed === 99999) minUnitSpeed = 1800;
 
-        let sendTimeMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(opt.vil.coords, selectedAttack.target) * maxUnitSpeed) * 1000);
+        let sendTimeMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(opt.vil.coords, selectedAttack.target) * minUnitSpeed) * 1000);
         row.querySelector('.col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
         opt.sendMs = sendTimeMs;
