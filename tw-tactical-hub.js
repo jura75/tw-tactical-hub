@@ -1,14 +1,26 @@
     javascript:(function() {
+    // Функция для автоматического определения текущего мира из URL игры
+    function getCurrentWorldServer() {
+        const host = window.location.host; // Например: "ru103.voynaplemyon.com"
+        const match = host.match(/^(ru\d+)/i);
+        if (match && match[1]) {
+            return match[1]; // Возвращает текущий мир, например "ru103"
+        }
+        return 'ru103'; // Запасной вариант по умолчанию
+    }
+
+    const currentWorld = getCurrentWorldServer();
+    const externalTimerUrl = `https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js`;
+
     const isConfirmationPage = window.location.href.includes('screen=place') && (document.querySelector('#troop_confirm_submit') || document.forms['command-form'] || document.getElementById('btn_confirm'));
 
     if (isConfirmationPage) {
-        fetch('https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js')
+        fetch(externalTimerUrl)
             .then(r => r.text())
             .then(code => {
                 try { eval(code); } catch(e) { console.error('Ошибка выполнения таймера:', e); }
             })
             .catch(err => console.error('Не удалось загрузить таймер с GitHub:', err));
-        // Убран прерывающий выполнение 'return;', чтобы интерфейс хаба продолжал отрисовываться
     }
 
     let existingPanel = document.getElementById('custom-tactical-hub');
@@ -19,6 +31,10 @@
     let savedPlans = localStorage.getItem('tw_hub_planned_orders');
     let plannedOrders = savedPlans ? JSON.parse(savedPlans) : [];
     
+    const nowInitMs = new Date().getTime();
+    plannedOrders = plannedOrders.filter(order => (order.sendMs || 0) >= nowInitMs);
+    localStorage.setItem('tw_hub_planned_orders', JSON.stringify(plannedOrders));
+    
     let savedFilters = localStorage.getItem('tw_hub_unit_filters');
     let unitFilterStates = savedFilters ? JSON.parse(savedFilters) : [true, true, true, true, true, true, true, true, true];
 
@@ -28,8 +44,17 @@
     let savedTcTargets = localStorage.getItem('tw_hub_tc_targets') || '';
     let isMobileMode = localStorage.getItem('tw_hub_mobile_mode') === 'true';
     
-    const unitSpeeds = [1800, 2100, 1080, 900, 600, 660, 1800, 1800, 600]; 
+    // ТОЧНЫЕ БАЗОВЫЕ СКОРОСТИ ЮНИТОВ ПО ТАБЛИЦЕ (секунд на поле при скорости мира 1.0)
+    // Индексы: 0:Копья(1080), 1:Мечи(1320), 2:Топоры(1080), 3:Развед(540), 4:ЛК(600), 5:ТК(660), 6:Тараны(1800), 7:Каты(1800), 8:Паладин(600)
+    const baseUnitSpeeds = [1080, 1320, 1080, 540, 600, 660, 1800, 1800, 600]; 
     const unitNames = ['Копья', 'Мечи', 'Топоры', 'Развед', 'ЛК', 'ТК', 'Тараны', 'Каты', 'Паладин'];
+
+    let worldSpeed = parseFloat(localStorage.getItem('tw_hub_world_speed')) || 1.0;
+
+    function getAdjustedSpeeds() {
+        return baseUnitSpeeds.map(speed => speed / worldSpeed);
+    }
+    let unitSpeeds = getAdjustedSpeeds();
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -45,7 +70,6 @@
         currentActiveTab = 'incomings';
     }
 
-    // Восстановление сохраненных кэшей из localStorage
     let savedTcPairs = localStorage.getItem('tw_hub_persisted_tc_pairs');
     let savedTcArrivalMs = localStorage.getItem('tw_hub_persisted_tc_arrival_ms');
     let savedIncAttacks = localStorage.getItem('tw_hub_persisted_inc_attacks');
@@ -53,18 +77,32 @@
     let savedIncSelectedAttack = localStorage.getItem('tw_hub_persisted_inc_sel_attack');
     let savedIncOptions = localStorage.getItem('tw_hub_persisted_inc_options');
 
+    let parsedTcPairs = savedTcPairs ? JSON.parse(savedTcPairs) : null;
+    if (parsedTcPairs) {
+        parsedTcPairs = parsedTcPairs.filter(p => (p.sendMs || 0) >= new Date().getTime());
+    }
+
     let tcCache = { 
-        selectedPairs: savedTcPairs ? JSON.parse(savedTcPairs) : null, 
+        selectedPairs: parsedTcPairs, 
         arrivalDateMs: savedTcArrivalMs ? parseInt(savedTcArrivalMs) : null, 
         cachedVillages: null 
     };
+
+    let parsedIncOpts = savedIncOptions ? JSON.parse(savedIncOptions) : null;
+    if (parsedIncOpts) {
+        parsedIncOpts = parsedIncOpts.filter(o => (o.sendMs || 0) >= new Date().getTime());
+    }
 
     let incCache = { 
         attacks: savedIncAttacks ? JSON.parse(savedIncAttacks) : null, 
         playerVillages: savedIncVillages ? JSON.parse(savedIncVillages) : null, 
         selectedAttack: savedIncSelectedAttack ? JSON.parse(savedIncSelectedAttack) : null, 
-        availableOptions: savedIncOptions ? JSON.parse(savedIncOptions) : null 
+        availableOptions: parsedIncOpts 
     };
+
+    if (incCache.selectedAttack && incCache.selectedAttack.arrivalDate) {
+        incCache.selectedAttack.arrivalDate = new Date(incCache.selectedAttack.arrivalDate);
+    }
 
     function persistTcState() {
         if (tcCache.selectedPairs) {
@@ -91,7 +129,7 @@
     }
 
     function runExternalTimer() {
-        fetch('https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js')
+        fetch(externalTimerUrl)
             .then(r => r.text())
             .then(code => {
                 try { eval(code); } catch(e) { console.error('Ошибка выполнения таймера:', e); }
@@ -109,7 +147,18 @@
         return `${d}.${m}.${y} ${h}:${min}:${s}`;
     }
 
+    function formatDuration(ms) {
+        if (ms < 0) ms = 0;
+        let totalSec = Math.round(ms / 1000);
+        let h = Math.floor(totalSec / 3600).toString().padStart(2, '0');
+        let m = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
+        let s = (totalSec % 60).toString().padStart(2, '0');
+        return `${h}:${m}:${s}`;
+    }
+
     function savePlans() {
+        const nowMs = new Date().getTime();
+        plannedOrders = plannedOrders.filter(order => (order.sendMs || 0) >= nowMs);
         localStorage.setItem('tw_hub_planned_orders', JSON.stringify(plannedOrders));
         const countElem = document.getElementById('plan-count');
         if (countElem) countElem.innerText = plannedOrders.length;
@@ -117,9 +166,7 @@
 
     function parseArrivalTime(arrivalStr) {
         const now = new Date();
-        let targetDate = new Date(now.getTime());
-        
-        if (!arrivalStr) return targetDate;
+        if (!arrivalStr) return new Date(now.getTime());
         const cleanStr = arrivalStr.trim();
         
         let fullDateMatch = cleanStr.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})(?:[\.:](\d{1,3}))?/);
@@ -136,6 +183,7 @@
         
         let timeMatch = cleanStr.match(/(\d{2}):(\d{2}):(\d{2})(?:[\.:](\d{1,3}))?/);
         if (timeMatch) {
+            let targetDate = new Date(now.getTime());
             let hours = parseInt(timeMatch[1], 10);
             let minutes = parseInt(timeMatch[2], 10);
             let seconds = parseInt(timeMatch[3], 10);
@@ -149,7 +197,7 @@
             }
             return targetDate;
         }
-        return targetDate;
+        return new Date(now.getTime());
     }
 
     const panel = document.createElement('div');
@@ -158,46 +206,18 @@
     function applyPanelStyles(mobile) {
         if (mobile) {
             panel.style.cssText = `
-                position: fixed;
-                top: 10px;
-                right: 10px;
-                width: 380px;
-                max-width: 95vw;
-                height: 85vh;
-                max-height: 90vh;
-                background: #2b1d0c;
-                border: 2px solid #7d510f;
-                box-shadow: 0 0 15px rgba(0,0,0,0.8);
-                z-index: 99999;
-                font-family: Verdana, Arial, sans-serif;
-                color: #f4e4bc;
-                border-radius: 4px;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
+                position: fixed; top: 10px; right: 10px; width: 380px; max-width: 95vw; height: 85vh; max-height: 90vh;
+                background: #2b1d0c; border: 2px solid #7d510f; box-shadow: 0 0 15px rgba(0,0,0,0.8);
+                z-index: 99999; font-family: Verdana, Arial, sans-serif; color: #f4e4bc; border-radius: 4px;
+                display: flex; flex-direction: column; overflow: hidden;
             `;
         } else {
             panel.style.cssText = `
-                position: fixed;
-                top: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 1280px;
-                min-width: 650px;
-                height: 650px;
-                min-height: 400px;
-                max-height: 95vh;
-                max-width: 98vw;
-                background: #2b1d0c;
-                border: 4px solid #7d510f;
-                box-shadow: 0 0 25px rgba(0,0,0,0.9);
-                z-index: 99999;
-                font-family: Verdana, Arial, sans-serif;
-                color: #f4e4bc;
-                border-radius: 4px;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
+                position: fixed; top: 20px; left: 50%; transform: translateX(-50%); width: 1320px; min-width: 650px;
+                height: 650px; min-height: 400px; max-height: 95vh; max-width: 98vw;
+                background: #2b1d0c; border: 4px solid #7d510f; box-shadow: 0 0 25px rgba(0,0,0,0.9);
+                z-index: 99999; font-family: Verdana, Arial, sans-serif; color: #f4e4bc; border-radius: 4px;
+                display: flex; flex-direction: column; overflow: hidden;
             `;
         }
     }
@@ -221,11 +241,16 @@
         <div style="background: #1a1006; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f; cursor: move;" id="hub-drag-header">
             <div>
                 <b style="font-size: 13px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.46</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.54 (${currentWorld})</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 5px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 4px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Скорость текущего мира игры">
+                    <label style="font-size: 10px; color: #f4e4bc; font-weight: bold;">Скорость мира:</label>
+                    <input type="range" id="world-speed-slider" min="0.5" max="3.0" step="0.1" value="${worldSpeed}" style="width: 50px; height: 10px; cursor: pointer;">
+                    <input type="number" id="world-speed-input" min="0.1" max="10" step="0.1" value="${worldSpeed}" style="width: 38px; font-size: 10px; text-align: center; background: #fff; border: 1px solid #7d510f; border-radius: 2px; color: #000;">
+                </div>
                 <label style="font-size: 11px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Компактный вид по размеру мобильного экрана">
-                    <input type="checkbox" id="hub-mobile-mode-chk" ${isMobileMode ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 📱 Мобильный вид
+                    <input type="checkbox" id="hub-mobile-mode-chk" ${isMobileMode ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 📱 Мобильный
                 </label>
                 <button id="hub-run-timer-btn" style="background: #4a7c59; border: 1px solid #284731; color: #fff; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px; font-size: 11px;">⚡ Таймер</button>
                 <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px; font-size: 11px;">Сканировать</button>
@@ -249,12 +274,38 @@
             <div id="tab-pane-plan" class="hub-pane" style="display:none;"></div>
         </div>
         <div style="background: #1a1006; padding: 4px 12px; font-size: 10px; color: #a98a5c; border-top: 1px solid #7d510f; display: flex; justify-content: space-between;">
-            <span id="hub-status">Статус: Готов к работе</span>
-            <span>Мир: ru106</span>
+            <span id="hub-status">Статус: Готов (${currentWorld})</span>
+            <span>Скорость мира: <span id="footer-speed-val">${worldSpeed}</span></span>
         </div>
     `;
 
     document.body.appendChild(panel);
+
+    const worldSpeedSlider = document.getElementById('world-speed-slider');
+    const worldSpeedInput = document.getElementById('world-speed-input');
+    const footerSpeedVal = document.getElementById('footer-speed-val');
+
+    function updateWorldSpeed(newSpeed) {
+        worldSpeed = Math.max(0.1, parseFloat(newSpeed) || 1.0);
+        worldSpeedSlider.value = worldSpeed;
+        worldSpeedInput.value = worldSpeed;
+        footerSpeedVal.innerText = worldSpeed;
+        localStorage.setItem('tw_hub_world_speed', worldSpeed);
+        unitSpeeds = getAdjustedSpeeds();
+
+        if (currentActiveTab === 'timecoords') {
+            const container = document.getElementById('tab-pane-timecoords');
+            if (container && tcCache.selectedPairs) {
+                document.getElementById('tc-generate-btn').click();
+            }
+        } else if (currentActiveTab === 'incomings' && incCache.selectedAttack && incCache.availableOptions) {
+            generateSrezOptions(incCache.selectedAttack);
+            renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
+        }
+    }
+
+    worldSpeedSlider.oninput = function() { updateWorldSpeed(this.value); };
+    worldSpeedInput.oninput = function() { updateWorldSpeed(this.value); };
 
     document.getElementById('hub-mobile-mode-chk').onchange = function() {
         isMobileMode = this.checked;
@@ -265,33 +316,6 @@
     let isResizing = false;
     let resizeDir = '';
     let startX, startY, startWidth, startHeight, startLeft, startTop;
-
-    panel.addEventListener('mousemove', (e) => {
-        if (isResizing || isMobileMode) return;
-        const rect = panel.getBoundingClientRect();
-        const b = 8;
-        let x = e.clientX - rect.left;
-        let y = e.clientY - rect.top;
-        let w = rect.width;
-        let h = rect.height;
-
-        let leftEdge = x < b;
-        let rightEdge = x > w - b;
-        let topEdge = y < b;
-        let bottomEdge = y > h - b;
-
-        if ((topEdge && leftEdge) || (bottomEdge && rightEdge)) {
-            panel.style.cursor = 'nwse-resize';
-        } else if ((topEdge && rightEdge) || (bottomEdge && leftEdge)) {
-            panel.style.cursor = 'nesw-resize';
-        } else if (leftEdge || rightEdge) {
-            panel.style.cursor = 'ew-resize';
-        } else if (topEdge || bottomEdge) {
-            panel.style.cursor = 'ns-resize';
-        } else {
-            panel.style.cursor = 'default';
-        }
-    });
 
     panel.addEventListener('mousedown', (e) => {
         if (isMobileMode) return;
@@ -331,45 +355,17 @@
         let dx = e.clientX - startX;
         let dy = e.clientY - startY;
 
-        let newWidth = startWidth;
-        let newHeight = startHeight;
-        let newLeft = startLeft;
-        let newTop = startTop;
-
-        if (resizeDir.includes('right')) {
-            newWidth = Math.max(650, startWidth + dx);
-        }
-        if (resizeDir.includes('left')) {
-            let potentialWidth = startWidth - dx;
-            if (potentialWidth >= 650) {
-                newWidth = potentialWidth;
-                newLeft = startLeft + dx;
-            }
-        }
-        if (resizeDir.includes('bottom')) {
-            newHeight = Math.max(400, startHeight + dy);
-        }
-        if (resizeDir.includes('top')) {
-            let potentialHeight = startHeight - dy;
-            if (potentialHeight >= 400) {
-                newHeight = potentialHeight;
-                newTop = startTop + dy;
-            }
-        }
+        let newWidth = Math.max(650, startWidth + (resizeDir.includes('right') ? dx : (resizeDir.includes('left') ? -dx : 0)));
+        let newHeight = Math.max(400, startHeight + (resizeDir.includes('bottom') ? dy : (resizeDir.includes('top') ? -dy : 0)));
 
         panel.style.width = newWidth + 'px';
         panel.style.height = newHeight + 'px';
-        panel.style.left = newLeft + 'px';
-        panel.style.top = newTop + 'px';
+        if (resizeDir.includes('left')) panel.style.left = (startLeft + dx) + 'px';
+        if (resizeDir.includes('top')) panel.style.top = (startTop + dy) + 'px';
         panel.style.transform = 'none';
     });
 
-    window.addEventListener('mouseup', () => {
-        if (isResizing) {
-            isResizing = false;
-            panel.style.cursor = 'default';
-        }
-    });
+    window.addEventListener('mouseup', () => { isResizing = false; });
 
     let isDragging = false;
     let dragStartX, dragStartY;
@@ -390,9 +386,7 @@
         panel.style.top = (e.clientY - dragStartY) + 'px';
     });
 
-    window.addEventListener('mouseup', () => {
-        isDragging = false;
-    });
+    window.addEventListener('mouseup', () => { isDragging = false; });
 
     document.getElementById('hub-close-btn').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('hub-run-timer-btn').onclick = () => { runExternalTimer(); };
@@ -403,9 +397,7 @@
             unitFilterStates[uIdx] = this.checked;
             localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
             
-            if (currentActiveTab === 'timecoords') {
-                runCalculation(false, false);
-            } else if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
+            if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
                 generateSrezOptions(incCache.selectedAttack);
                 renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
             }
@@ -419,9 +411,7 @@
             unitMinValues[uIdx] = isNaN(val) ? 0 : val;
             localStorage.setItem('tw_hub_min_units', JSON.stringify(unitMinValues));
 
-            if (currentActiveTab === 'timecoords') {
-                runCalculation(false, false);
-            } else if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
+            if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
                 generateSrezOptions(incCache.selectedAttack);
                 renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
             }
@@ -432,7 +422,6 @@
         renderTimeCoordsTab(document.getElementById('tab-pane-timecoords'));
         renderPlanTab(document.getElementById('tab-pane-plan'));
         
-        // Восстановление сохраненного интерфейса при открытии
         if (currentActiveTab === 'incomings') {
             const incPane = document.getElementById('tab-pane-incomings');
             if (incCache.selectedAttack && incCache.availableOptions) {
@@ -492,14 +481,17 @@
         let freshPlans = localStorage.getItem('tw_hub_planned_orders');
         if (freshPlans) plannedOrders = JSON.parse(freshPlans);
         
+        const nowMs = new Date().getTime();
+        plannedOrders = plannedOrders.filter(order => (order.sendMs || 0) >= nowMs);
+        savePlans();
+        
         plannedOrders.sort((a, b) => (a.sendMs || 0) - (b.sendMs || 0));
 
         if (plannedOrders.length === 0) {
-            container.innerHTML = `<div style="text-align: center; color: #555; margin-top: 30px; font-weight: bold; font-size: 12px;">Список запланированных приказов пуст.<br>Добавьте их из «Входящих» или вкладки «Тайм-коры».</div>`;
+            container.innerHTML = `<div style="text-align: center; color: #555; margin-top: 30px; font-weight: bold; font-size: 12px;">Список запланированных приказов пуст (или все просрочены).<br>Добавьте их из «Входящих» или вкладки «Тайм-коры».</div>`;
             return;
         }
 
-        const nowMs = new Date().getTime();
         let html = `<p style="font-weight: bold; margin-bottom: 8px; color: #5a2d0c; font-size: 12px;">Запланированные отправки (${plannedOrders.length}):</p>`;
         
         plannedOrders.forEach((order, idx) => {
@@ -545,6 +537,11 @@
         return Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2));
     }
 
+    function calculateTravelTimeMs(distance, unitSpeedSec) {
+        const exactSeconds = Math.round(distance * unitSpeedSec);
+        return exactSeconds * 1000;
+    }
+
     function renderTimeCoordsTab(container) {
         container.innerHTML = `
             <div style="margin-bottom: 8px;">
@@ -577,7 +574,7 @@
 
             <div style="display: flex; gap: 6px; margin-bottom: 10px;">
                 <button id="tc-generate-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 5px 12px; cursor: pointer; border-radius: 3px; flex: 2; font-size: 11px;">Рассчитать тайм-коры</button>
-                <button id="tc-refresh-villages-btn" style="background: #a47846; border: 1px solid #4a331a; color: #fff; font-weight: bold; padding: 5px 10px; cursor: pointer; border-radius: 3px; flex: 1.5; font-size: 11px;" title="Загрузить заново деревни и войска с сервера игры">🔄 Обновить варианты поиска деревень</button>
+                <button id="tc-refresh-villages-btn" style="background: #a47846; border: 1px solid #4a331a; color: #fff; font-weight: bold; padding: 5px 10px; cursor: pointer; border-radius: 3px; flex: 1.5; font-size: 11px;" title="Загрузить заново деревни и войска с сервера игры">🔄 Обновить деревни</button>
                 <button id="tc-refresh-btn" style="background: #8fa876; border: 1px solid #3c522b; color: #1a2b0c; font-weight: bold; padding: 5px 10px; cursor: pointer; border-radius: 3px; flex: 1; font-size: 11px;">Сбросить время</button>
             </div>
 
@@ -667,7 +664,7 @@
                     
                     doc.querySelectorAll('tr').forEach((row) => {
                         const rowText = row.innerText.toLowerCase();
-                        if (rowText.includes('итого') || rowText.includes('всего') || rowText.includes('total') || !rowText.trim()) return;
+                        if (rowText.includes('итого') || rowText.includes('всего') || !rowText.trim()) return;
                         const cols = row.querySelectorAll('td');
                         if (cols.length > 0 && cols[0].innerText.toLowerCase().includes('всего')) return;
 
@@ -690,9 +687,7 @@
                             }
                         }
                     });
-                } catch (e) {
-                    console.error('Ошибка загрузки деревень:', e);
-                }
+                } catch (e) {}
 
                 if (playerVillages.length === 0 && typeof game_data !== 'undefined') {
                     playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
@@ -702,6 +697,7 @@
 
             status.innerText = `Статус: Расчет тайм-коров (${targets.length} целей)...`;
             let allPairs = [];
+            const currentNowMs = new Date().getTime();
 
             playerVillages.forEach(vil => {
                 targets.forEach(target => {
@@ -730,8 +726,11 @@
                                 existingPair.indivArrStr = arrivalStr;
                             }
                             
-                            existingPair.sendMs = targetArrMs - (Math.round(dist * unitSpeeds[u]) * 1000);
-                            allPairs.push(existingPair);
+                            existingPair.sendMs = targetArrMs - calculateTravelTimeMs(dist, unitSpeeds[u]);
+                            
+                            if (existingPair.sendMs >= currentNowMs) {
+                                allPairs.push(existingPair);
+                            }
                             oldPairsMap.delete(key);
                             continue;
                         }
@@ -746,33 +745,37 @@
                             if (!isNaN(parsedDate.getTime())) targetArrMs = parsedDate.getTime();
                         }
 
-                        let sendMs = targetArrMs - (Math.round(dist * unitSpeeds[u]) * 1000);
+                        let sendMs = targetArrMs - calculateTravelTimeMs(dist, unitSpeeds[u]);
 
-                        if (sendMs >= new Date().getTime() || isLocked) {
-                            let unitsArr = ['0','0','0','0','0','0','0','0','0'];
-                            unitsArr[u] = availableCount.toString();
+                        if (sendMs < currentNowMs) continue;
 
-                            let newPair = {
-                                vil: vil, target: target, dist: dist, activeUnitIdx: u, maxSpeed: unitSpeeds[u], sendMs: sendMs,
-                                currentUnits: unitsArr, sliderVal: 100, sigVal: '0',
-                                indivArrStr: indStr, lockTime: isLocked
-                            };
+                        let unitsArr = ['0','0','0','0','0','0','0','0','0'];
+                        unitsArr[u] = availableCount.toString();
 
-                            if (existingPair && !isFullRefresh) {
-                                newPair.sliderVal = existingPair.sliderVal;
-                                newPair.sigVal = existingPair.sigVal;
-                                newPair.currentUnits = [...existingPair.currentUnits];
-                                newPair.lockTime = existingPair.lockTime;
-                                newPair.indivArrStr = existingPair.indivArrStr;
-                            }
-                            allPairs.push(newPair);
+                        let newPair = {
+                            vil: vil, target: target, dist: dist, activeUnitIdx: u, maxSpeed: unitSpeeds[u], sendMs: sendMs,
+                            currentUnits: unitsArr, sliderVal: 100, sigVal: '0',
+                            indivArrStr: indStr, lockTime: isLocked
+                        };
+
+                        if (existingPair && !isFullRefresh) {
+                            newPair.sliderVal = existingPair.sliderVal;
+                            newPair.sigVal = existingPair.sigVal;
+                            newPair.currentUnits = [...existingPair.currentUnits];
+                            newPair.lockTime = existingPair.lockTime;
+                            newPair.indivArrStr = existingPair.indivArrStr;
                         }
+                        allPairs.push(newPair);
                     }
                 });
             });
 
             if (!isFullRefresh) {
-                oldPairsMap.forEach(pair => allPairs.push(pair));
+                oldPairsMap.forEach(pair => {
+                    if ((pair.sendMs || 0) >= currentNowMs) {
+                        allPairs.push(pair);
+                    }
+                });
             }
             allPairs.sort((a, b) => a.sendMs - b.sendMs);
 
@@ -787,23 +790,14 @@
                 }
             });
 
-            selectedPairs.sort((a, b) => {
-                let arrivalNowA = new Date().getTime() + (Math.round(a.dist * unitSpeeds[a.activeUnitIdx]) * 1000);
-                let arrivalNowB = new Date().getTime() + (Math.round(b.dist * unitSpeeds[b.activeUnitIdx]) * 1000);
-                return arrivalNowA - arrivalNowB;
-            });
-
             tcCache.selectedPairs = selectedPairs;
             persistTcState();
             renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, arrivalStr, container);
-            status.innerText = `Статус: Готово (${selectedPairs.length} вар.)`;
+            status.innerText = `Статус: Готово (${selectedPairs.length} актуальных вар.)`;
         };
 
         container.querySelector('#tc-generate-btn').onclick = () => runCalculation(false, false);
-        container.querySelector('#tc-refresh-villages-btn').onclick = () => {
-            status.innerText = 'Статус: Обновление базы деревень...';
-            runCalculation(false, true);
-        };
+        container.querySelector('#tc-refresh-villages-btn').onclick = () => runCalculation(false, true);
         container.querySelector('#tc-refresh-btn').onclick = () => runCalculation(true, false);
 
         if (tcCache.selectedPairs && tcCache.selectedPairs.length > 0) {
@@ -814,7 +808,6 @@
     function updateRowBorders(row, sendMs) {
         const nowMs = new Date().getTime();
         const isOk = sendMs >= nowMs;
-        
         const borderColor = isOk ? '#2e7d32' : '#b22222';
         const bgColor = isOk ? '#e8f5e9' : '#ffebee';
         
@@ -827,8 +820,13 @@
     }
 
     function renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, defaultArrivalStr, mainContainer) {
+        const currentNowMs = new Date().getTime();
+        selectedPairs = selectedPairs.filter(p => (p.sendMs || 0) >= currentNowMs);
+        tcCache.selectedPairs = selectedPairs;
+        persistTcState();
+
         if (selectedPairs.length === 0) {
-            resultsArea.innerHTML = `<div style="padding: 15px; text-align: center; color: #b22222; font-weight: bold; font-size: 11px;">Не удалось найти вариантов отправки. Убедитесь, что выбраны нужные галочки юнитов, заданы лимиты и в деревнях достаточно войск.</div>`;
+            resultsArea.innerHTML = `<div style="padding: 15px; text-align: center; color: #b22222; font-weight: bold; font-size: 11px;">Нет актуальных (не просроченных) вариантов отправки. Измените время прихода или параметры.</div>`;
             return;
         }
 
@@ -836,6 +834,8 @@
         selectedPairs.forEach((pair, idx) => {
             const vil = pair.vil;
             let formattedTime = formatDateStr(new Date(pair.sendMs));
+            let travelTimeMsVal = calculateTravelTimeMs(pair.dist, unitSpeeds[pair.activeUnitIdx]);
+            let formattedTravelTime = formatDuration(travelTimeMsVal);
             let [tX, tY] = pair.target.split('|');
 
             let unitInputs = '';
@@ -872,10 +872,11 @@
                                 <input type="checkbox" class="tc-lock-time-chk" ${pair.lockTime ? 'checked' : ''} style="cursor: pointer; width: 10px; height: 10px; margin: 0;">
                             </label>
                         </div>
-                        <input type="text" class="tc-indiv-arr-input" value="${pair.indivArrStr}" style="width: 110px; font-size: 9px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                        <input type="text" class="tc-indiv-arr-input" value="${pair.indivArrStr || defaultArrivalStr}" style="width: 110px; font-size: 9px; text-align: center; border: 1px solid #7d510f; background: #fff;">
                     </td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="tc-col-arrival">00:00:00</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="tc-col-time">${formattedTime}</td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px; color: #333;" class="tc-col-travel-time">${formattedTravelTime}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold; font-size: 10px;" class="tc-col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
                         <a href="/game.php?village=${vil.id}&screen=place&x=${tX}&y=${tY}&input_x=${tX}&input_y=${tY}&try=confirm&${unitNames[pair.activeUnitIdx].toLowerCase()}=${pair.currentUnits[pair.activeUnitIdx]}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 3px 6px; text-decoration: none; color: #333; border-radius: 3px; font-weight: bold; display:inline-block; margin-right: 3px; font-size: 10px;">Перейти</a>
@@ -892,7 +893,7 @@
         }
 
         resultsArea.innerHTML = `
-            <div style="font-weight: bold; margin-bottom: 6px; color: #5a2d0c; font-size: 11px;">Найдено вариантов: ${selectedPairs.length}</div>
+            <div style="font-weight: bold; margin-bottom: 6px; color: #5a2d0c; font-size: 11px;">Найдено актуальных вариантов: ${selectedPairs.length}</div>
             <div style="overflow-x: auto; max-height: 250px; border: 1px solid #7d510f;">
                 <table id="tc-options-table" style="width: 100%; border-collapse: collapse; background: #fff; font-size: 10px; text-align: center;">
                     <tr style="background: #d4bc8c; border-bottom: 2px solid #7d510f; font-weight: bold; position: sticky; top: 0; z-index: 5;">
@@ -902,6 +903,7 @@
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время прихода</th>
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Приход (сейчас)</th>
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время отправки</th>
+                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время в пути</th>
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Таймер</th>
                         <th style="padding: 5px; font-size: 9px;">Действие</th>
                     </tr>
@@ -933,7 +935,7 @@
                         arrivalNowElem.innerText = "00:00:00";
                     } else {
                         let activeSpeed = unitSpeeds[pair.activeUnitIdx];
-                        let travelTimeMs = Math.round(pair.dist * activeSpeed) * 1000;
+                        let travelTimeMs = calculateTravelTimeMs(pair.dist, activeSpeed);
                         let currentArrivalMs = now + travelTimeMs;
                         arrivalNowElem.innerText = formatDateStr(new Date(currentArrivalMs));
                     }
@@ -1027,16 +1029,11 @@
         const indivInp = row.querySelector('.tc-indiv-arr-input');
         const lockChk = row.querySelector('.tc-lock-time-chk');
         
-        if (lockChk.checked) {
-            pair.lockTime = true;
-        }
+        if (lockChk.checked) pair.lockTime = true;
 
         if (pair.lockTime && indivInp && indivInp.value) {
             let parsedDate = parseArrivalTime(indivInp.value);
             if (!isNaN(parsedDate.getTime())) targetArrivalMs = parsedDate.getTime();
-            pair.indivArrStr = indivInp.value;
-        } else if (!pair.lockTime && indivInp) {
-            indivInp.value = formatDateStr(new Date(arrivalMs));
             pair.indivArrStr = indivInp.value;
         }
 
@@ -1045,7 +1042,7 @@
         });
 
         let activeSpeed = unitSpeeds[pair.activeUnitIdx];
-        let sendTimeMs = targetArrivalMs - (Math.round(getDistance(pair.vil.coords, pair.target) * activeSpeed) * 1000);
+        let sendTimeMs = targetArrivalMs - calculateTravelTimeMs(pair.dist, activeSpeed);
         
         row.querySelector('.tc-col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
@@ -1089,6 +1086,9 @@
             btn.onclick = function() {
                 const attId = this.getAttribute('data-id');
                 const selectedAttack = attacks.find(a => a.id == attId);
+                if (selectedAttack && typeof selectedAttack.arrivalDate === 'string') {
+                    selectedAttack.arrivalDate = new Date(selectedAttack.arrivalDate);
+                }
                 incCache.selectedAttack = selectedAttack;
                 generateSrezOptions(selectedAttack);
                 renderSrezView(container, selectedAttack, incCache.availableOptions);
@@ -1098,6 +1098,12 @@
 
     function generateSrezOptions(selectedAttack) {
         let availableOptions = [];
+        if (!selectedAttack.arrivalDate || typeof selectedAttack.arrivalDate === 'string') {
+            selectedAttack.arrivalDate = new Date(selectedAttack.arrivalDate);
+        }
+        let arrMs = selectedAttack.arrivalDate.getTime();
+        const currentNowMs = new Date().getTime();
+
         incCache.playerVillages.forEach((vil) => {
             for (let u = 0; u < 9; u++) {
                 if (!unitFilterStates[u]) continue;
@@ -1107,13 +1113,14 @@
 
                 if (availableCount < requiredCount) continue;
 
-                let initialSendMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(vil.coords, selectedAttack.target) * unitSpeeds[u]) * 1000);
+                const dist = getDistance(vil.coords, selectedAttack.target);
+                let initialSendMs = arrMs - calculateTravelTimeMs(dist, unitSpeeds[u]);
 
-                if (initialSendMs >= new Date().getTime()) {
-                    let unitsArr = ['0','0','0','0','0','0','0','0','0'];
-                    unitsArr[u] = availableCount.toString();
-                    availableOptions.push({ vil: vil, activeUnitIdx: u, sendMs: initialSendMs, currentUnits: unitsArr, sliderVal: 100, sigVal: '0' });
-                }
+                if (initialSendMs < currentNowMs) continue;
+
+                let unitsArr = ['0','0','0','0','0','0','0','0','0'];
+                unitsArr[u] = availableCount.toString();
+                availableOptions.push({ vil: vil, activeUnitIdx: u, sendMs: initialSendMs, currentUnits: unitsArr, sliderVal: 100, sigVal: '0' });
             }
         });
         availableOptions.sort((a, b) => a.sendMs - b.sendMs);
@@ -1151,16 +1158,14 @@
                     const arrival = cols[5].innerText.trim();
                     let arrivalDate = parseArrivalTime(arrival);
 
-                    if (arrivalDate.getTime() <= nowMs) {
-                        arrivalDate = new Date(nowMs + 3600000); // Страховка для уже прошедших/некорректных дат в старых отчетах
+                    if (arrivalDate.getTime() > nowMs) {
+                        attacks.push({ 
+                            id: index + 1, type: type.replace(/\s+/g, ' '), 
+                            target: targetText.match(/\d+\|\d+/) ? targetText.match(/\d+\|\d+/)[0] : targetText, 
+                            origin: originText.match(/\d+\|\d+/) ? originText.match(/\d+\|\d+/) [0] : '000|000', 
+                            arrival, arrivalDate: arrivalDate.toISOString()
+                        });
                     }
-
-                    attacks.push({ 
-                        id: index + 1, type: type.replace(/\s+/g, ' '), 
-                        target: targetText.match(/\d+\|\d+/) ? targetText.match(/\d+\|\d+/)[0] : targetText, 
-                        origin: originText.match(/\d+\|\d+/) ? originText.match(/\d+\|\d+/) [0] : '000|000', 
-                        arrival, arrivalDate: arrivalDate.toISOString()
-                    });
                 }
             });
         } catch (e) {
@@ -1202,7 +1207,6 @@
             playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
         }
 
-        // Приведение дат к объектам Date для корректной работы
         attacks.forEach(a => { a.arrivalDate = new Date(a.arrivalDate); });
 
         incCache.attacks = attacks;
@@ -1211,14 +1215,19 @@
         incCache.availableOptions = null;
         persistIncState();
 
-        status.innerText = `Статус: Атак: ${attacks.length} | Деревень: ${playerVillages.length}`;
+        status.innerText = `Статус: Актуальных атак: ${attacks.length} | Деревень: ${playerVillages.length}`;
         renderIncomingsList(container, attacks);
     };
 
     function renderSrezView(container, selectedAttack, availableOptions) {
-        if (!selectedAttack.arrivalDate || typeof selectedAttack.arrivalDate === 'string') {
-            selectedAttack.arrivalDate = new Date(selectedAttack.arrivalDate);
+        if (!selectedAttack.arrivalDate || !(selectedAttack.arrivalDate instanceof Date)) {
+            selectedAttack.arrivalDate = new Date(selectedAttack.arrivalDate || Date.now());
         }
+
+        const currentNowMs = new Date().getTime();
+        availableOptions = availableOptions.filter(opt => (opt.sendMs || 0) >= currentNowMs);
+        incCache.availableOptions = availableOptions;
+        persistIncState();
 
         if (availableOptions.length === 0) {
             container.innerHTML = `
@@ -1226,7 +1235,7 @@
                     <button id="back-to-list" style="background: #d4bc8c; border: 1px solid #7d510f; font-size: 10px; padding: 3px 8px; font-weight: bold; cursor: pointer;">← Назад</button>
                     <button id="refresh-srez-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-size: 10px; padding: 3px 10px; font-weight: bold; cursor: pointer; border-radius: 3px;">🔄 Обновить</button>
                 </div>
-                <div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold; font-size: 11px;">Нет доступных вариантов для перехвата. Проверьте галочки юнитов и лимиты в верхнем меню.</div>
+                <div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold; font-size: 11px;">Нет актуальных вариантов для перехвата (все варианты просрочены). Проверьте фильтры и наличие войск.</div>
             `;
             container.querySelector('#back-to-list').onclick = () => {
                 incCache.selectedAttack = null;
@@ -1246,6 +1255,10 @@
         let tableRowsHtml = '';
         availableOptions.forEach((opt, idx) => {
             const vil = opt.vil;
+            const dist = getDistance(vil.coords, selectedAttack.target);
+            let travelTimeMsVal = calculateTravelTimeMs(dist, unitSpeeds[opt.activeUnitIdx]);
+            let formattedTravelTime = formatDuration(travelTimeMsVal);
+
             let unitInputs = '';
             for (let u = 0; u < 9; u++) {
                 let maxVal = parseInt(vil.units[u]) || 0;
@@ -1271,6 +1284,8 @@
                     ${unitInputs}
                     <td style="padding: 3px; border-right: 1px solid #e2d2b5;"><input type="text" class="sig-input-val" value="${opt.sigVal}" style="width: 22px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;"></td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="col-time">${formatDateStr(new Date(opt.sendMs))}</td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px; color: #333;" class="col-travel-time">${formattedTravelTime}</td>
+                    <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="col-arrival-time">${formatDateStr(selectedAttack.arrivalDate)}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; color: #b22222; font-weight: bold; font-size: 10px;" class="col-timer">00:00:00</td>
                     <td style="padding: 6px; white-space: nowrap;">
                         <a href="/game.php?village=${vil.id}&screen=place&x=${attX}&y=${attY}&input_x=${attX}&input_y=${attY}&try=confirm&${unitNames[opt.activeUnitIdx].toLowerCase()}=${opt.currentUnits[opt.activeUnitIdx]}" target="_blank" style="background: #f4e4bc; border: 1px solid #7d510f; padding: 3px 6px; text-decoration: none; color: #333; border-radius: 3px; font-weight: bold; display:inline-block; margin-right: 3px; font-size: 10px;">Перейти</a>
@@ -1292,7 +1307,7 @@
                     <button id="back-to-list" style="background: #d4bc8c; border: 1px solid #7d510f; font-size: 10px; padding: 3px 8px; font-weight: bold; cursor: pointer;">← Назад</button>
                     <button id="refresh-srez-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-size: 10px; padding: 3px 10px; font-weight: bold; cursor: pointer; border-radius: 3px;">🔄 Обновить</button>
                 </div>
-                <span style="font-size: 10px; color: #5a2d0c; font-weight: bold;">Вариантов: ${availableOptions.length}</span>
+                <span style="font-size: 10px; color: #5a2d0c; font-weight: bold;">Актуальных вариантов: ${availableOptions.length}</span>
             </div>
             <div style="background: #fff; border: 1px solid #7d510f; padding: 6px 10px; margin-bottom: 8px; border-radius: 3px; font-size: 10px;">
                 <b>Атака:</b> ${selectedAttack.origin} → ${selectedAttack.target} | <b>Прибытие:</b> <span style="color: #b22222; font-weight: bold;">${selectedAttack.arrival}</span>
@@ -1304,6 +1319,8 @@
                         ${headerUnitsHtml}
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Сиг</th>
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время отправки</th>
+                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время в пути</th>
+                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время прибытия</th>
                         <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Таймер</th>
                         <th style="padding: 5px; font-size: 9px;">Приказ</th>
                     </tr>
@@ -1412,7 +1429,8 @@
         });
 
         let activeSpeed = unitSpeeds[opt.activeUnitIdx];
-        let sendTimeMs = selectedAttack.arrivalDate.getTime() - (Math.round(getDistance(opt.vil.coords, selectedAttack.target) * activeSpeed) * 1000);
+        const dist = getDistance(opt.vil.coords, selectedAttack.target);
+        let sendTimeMs = selectedAttack.arrivalDate.getTime() - calculateTravelTimeMs(dist, activeSpeed);
         
         row.querySelector('.col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
@@ -1423,4 +1441,4 @@
 
     initStaticPanes();
     switchTab(currentActiveTab, false);
-})(); 
+})();
