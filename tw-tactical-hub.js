@@ -1,4 +1,4 @@
-javascript:(function() {
+    javascript:(function() {
     const isConfirmationPage = window.location.href.includes('screen=place') && (document.querySelector('#troop_confirm_submit') || document.forms['command-form'] || document.getElementById('btn_confirm'));
 
     if (isConfirmationPage) {
@@ -8,7 +8,7 @@ javascript:(function() {
                 try { eval(code); } catch(e) { console.error('Ошибка выполнения таймера:', e); }
             })
             .catch(err => console.error('Не удалось загрузить таймер с GitHub:', err));
-        return;
+        // Убран прерывающий выполнение 'return;', чтобы интерфейс хаба продолжал отрисовываться
     }
 
     let existingPanel = document.getElementById('custom-tactical-hub');
@@ -45,8 +45,50 @@ javascript:(function() {
         currentActiveTab = 'incomings';
     }
 
-    let tcCache = { selectedPairs: null, arrivalDateMs: null, cachedVillages: null };
-    let incCache = { attacks: null, playerVillages: null, selectedAttack: null, availableOptions: null };
+    // Восстановление сохраненных кэшей из localStorage
+    let savedTcPairs = localStorage.getItem('tw_hub_persisted_tc_pairs');
+    let savedTcArrivalMs = localStorage.getItem('tw_hub_persisted_tc_arrival_ms');
+    let savedIncAttacks = localStorage.getItem('tw_hub_persisted_inc_attacks');
+    let savedIncVillages = localStorage.getItem('tw_hub_persisted_inc_villages');
+    let savedIncSelectedAttack = localStorage.getItem('tw_hub_persisted_inc_sel_attack');
+    let savedIncOptions = localStorage.getItem('tw_hub_persisted_inc_options');
+
+    let tcCache = { 
+        selectedPairs: savedTcPairs ? JSON.parse(savedTcPairs) : null, 
+        arrivalDateMs: savedTcArrivalMs ? parseInt(savedTcArrivalMs) : null, 
+        cachedVillages: null 
+    };
+
+    let incCache = { 
+        attacks: savedIncAttacks ? JSON.parse(savedIncAttacks) : null, 
+        playerVillages: savedIncVillages ? JSON.parse(savedIncVillages) : null, 
+        selectedAttack: savedIncSelectedAttack ? JSON.parse(savedIncSelectedAttack) : null, 
+        availableOptions: savedIncOptions ? JSON.parse(savedIncOptions) : null 
+    };
+
+    function persistTcState() {
+        if (tcCache.selectedPairs) {
+            localStorage.setItem('tw_hub_persisted_tc_pairs', JSON.stringify(tcCache.selectedPairs));
+            localStorage.setItem('tw_hub_persisted_tc_arrival_ms', tcCache.arrivalDateMs || '');
+        } else {
+            localStorage.removeItem('tw_hub_persisted_tc_pairs');
+            localStorage.removeItem('tw_hub_persisted_tc_arrival_ms');
+        }
+    }
+
+    function persistIncState() {
+        if (incCache.attacks) localStorage.setItem('tw_hub_persisted_inc_attacks', JSON.stringify(incCache.attacks));
+        else localStorage.removeItem('tw_hub_persisted_inc_attacks');
+
+        if (incCache.playerVillages) localStorage.setItem('tw_hub_persisted_inc_villages', JSON.stringify(incCache.playerVillages));
+        else localStorage.removeItem('tw_hub_persisted_inc_villages');
+
+        if (incCache.selectedAttack) localStorage.setItem('tw_hub_persisted_inc_sel_attack', JSON.stringify(incCache.selectedAttack));
+        else localStorage.removeItem('tw_hub_persisted_inc_sel_attack');
+
+        if (incCache.availableOptions) localStorage.setItem('tw_hub_persisted_inc_options', JSON.stringify(incCache.availableOptions));
+        else localStorage.removeItem('tw_hub_persisted_inc_options');
+    }
 
     function runExternalTimer() {
         fetch('https://raw.githack.com/jura75/tw-attack-timer.js/main/tw-attack-timer.js')
@@ -179,7 +221,7 @@ javascript:(function() {
         <div style="background: #1a1006; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f; cursor: move;" id="hub-drag-header">
             <div>
                 <b style="font-size: 13px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.45</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.46</span>
             </div>
             <div style="display: flex; align-items: center; gap: 5px;">
                 <label style="font-size: 11px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Компактный вид по размеру мобильного экрана">
@@ -389,6 +431,16 @@ javascript:(function() {
     function initStaticPanes() {
         renderTimeCoordsTab(document.getElementById('tab-pane-timecoords'));
         renderPlanTab(document.getElementById('tab-pane-plan'));
+        
+        // Восстановление сохраненного интерфейса при открытии
+        if (currentActiveTab === 'incomings') {
+            const incPane = document.getElementById('tab-pane-incomings');
+            if (incCache.selectedAttack && incCache.availableOptions) {
+                renderSrezView(incPane, incCache.selectedAttack, incCache.availableOptions);
+            } else if (incCache.attacks && incCache.attacks.length > 0) {
+                renderIncomingsList(incPane, incCache.attacks);
+            }
+        }
     }
 
     function switchTab(tabName, saveToStorage = true) {
@@ -420,6 +472,13 @@ javascript:(function() {
             renderPlanTab(targetPane);
         } else if (tabName === 'incomings' && !incCache.attacks) {
             document.getElementById('hub-scan-btn').click();
+        } else if (tabName === 'incomings' && incCache.attacks) {
+            const incPane = document.getElementById('tab-pane-incomings');
+            if (incCache.selectedAttack && incCache.availableOptions) {
+                renderSrezView(incPane, incCache.selectedAttack, incCache.availableOptions);
+            } else {
+                renderIncomingsList(incPane, incCache.attacks);
+            }
         }
     }
 
@@ -546,6 +605,7 @@ javascript:(function() {
                     if (pair.lockTime) return;
                     pair.indivArrStr = savedTcArrival;
                 });
+                persistTcState();
                 const resultsArea = container.querySelector('#tc-results-area');
                 renderTcResultsTable(tcCache.selectedPairs, resultsArea, parseArrivalTime(savedTcArrival).getTime(), savedTcArrival, container);
             }
@@ -563,6 +623,9 @@ javascript:(function() {
             targetsInput.value = '';
             savedTcTargets = '';
             localStorage.setItem('tw_hub_tc_targets', '');
+            tcCache.selectedPairs = null;
+            persistTcState();
+            renderTimeCoordsTab(container);
             targetsInput.focus();
         };
 
@@ -731,6 +794,7 @@ javascript:(function() {
             });
 
             tcCache.selectedPairs = selectedPairs;
+            persistTcState();
             renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, arrivalStr, container);
             status.innerText = `Статус: Готово (${selectedPairs.length} вар.)`;
         };
@@ -899,10 +963,11 @@ javascript:(function() {
             const sigInp = row.querySelector('.tc-sig-input-val');
             const lockChk = row.querySelector('.tc-lock-time-chk');
 
-            sigInp.oninput = function() { pair.sigVal = this.value; };
+            sigInp.oninput = function() { pair.sigVal = this.value; persistTcState(); };
             
             lockChk.onchange = function() { 
                 pair.lockTime = this.checked; 
+                persistTcState();
             };
 
             indivInp.oninput = function() { 
@@ -928,6 +993,7 @@ javascript:(function() {
             
             row.querySelector('.tc-del-row-btn').onclick = function() {
                 selectedPairs.splice(pIdx, 1);
+                persistTcState();
                 renderTcResultsTable(selectedPairs, resultsArea, arrivalMs, defaultArrivalStr, mainContainer);
             };
 
@@ -984,11 +1050,17 @@ javascript:(function() {
         row.querySelector('.tc-col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
         pair.sendMs = sendTimeMs;
+        persistTcState();
         updateRowBorders(row, sendTimeMs);
     }
 
     function renderIncomingsList(container, attacks) {
-        let html = `<p style="font-weight: bold; margin-bottom: 8px; font-size: 11px;">Активные входящие атаки (${attacks.length}):</p>`;
+        let html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <p style="font-weight: bold; margin: 0; font-size: 11px;">Активные входящие атаки (${attacks.length}):</p>
+                <button id="inc-clear-list-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 6px; font-size: 9px; font-weight: bold; cursor: pointer; border-radius: 2px;">Очистить список</button>
+            </div>
+        `;
         attacks.forEach(att => {
             html += `
                 <div style="background: #fff; border: 1px solid #c19a5b; padding: 8px; margin-bottom: 6px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
@@ -1003,6 +1075,15 @@ javascript:(function() {
             `;
         });
         container.innerHTML = html;
+
+        container.querySelector('#inc-clear-list-btn').onclick = function() {
+            incCache.attacks = null;
+            incCache.selectedAttack = null;
+            incCache.availableOptions = null;
+            persistIncState();
+            container.innerHTML = `<div style="padding: 15px; text-align: center; color: #555; font-size: 11px;">Список входящих очищен. Нажмите «Сканировать» для загрузки.</div>`;
+            document.getElementById('hub-status').innerText = 'Статус: Список очищен';
+        };
 
         container.querySelectorAll('.open-srez-btn').forEach(btn => {
             btn.onclick = function() {
@@ -1037,6 +1118,7 @@ javascript:(function() {
         });
         availableOptions.sort((a, b) => a.sendMs - b.sendMs);
         incCache.availableOptions = availableOptions;
+        persistIncState();
     }
 
     document.getElementById('hub-scan-btn').onclick = async function() {
@@ -1067,16 +1149,18 @@ javascript:(function() {
                     const originElem = cols[2].querySelector('a');
                     const originText = originElem ? originElem.innerText.trim() : cols[2].innerText.trim();
                     const arrival = cols[5].innerText.trim();
-                    const arrivalDate = parseArrivalTime(arrival);
+                    let arrivalDate = parseArrivalTime(arrival);
 
-                    if (arrivalDate.getTime() > nowMs) {
-                        attacks.push({ 
-                            id: index + 1, type: type.replace(/\s+/g, ' '), 
-                            target: targetText.match(/\d+\|\d+/) ? targetText.match(/\d+\|\d+/)[0] : targetText, 
-                            origin: originText.match(/\d+\|\d+/) ? originText.match(/\d+\|\d+/) [0] : '000|000', 
-                            arrival, arrivalDate
-                        });
+                    if (arrivalDate.getTime() <= nowMs) {
+                        arrivalDate = new Date(nowMs + 3600000); // Страховка для уже прошедших/некорректных дат в старых отчетах
                     }
+
+                    attacks.push({ 
+                        id: index + 1, type: type.replace(/\s+/g, ' '), 
+                        target: targetText.match(/\d+\|\d+/) ? targetText.match(/\d+\|\d+/)[0] : targetText, 
+                        origin: originText.match(/\d+\|\d+/) ? originText.match(/\d+\|\d+/) [0] : '000|000', 
+                        arrival, arrivalDate: arrivalDate.toISOString()
+                    });
                 }
             });
         } catch (e) {
@@ -1118,13 +1202,24 @@ javascript:(function() {
             playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
         }
 
+        // Приведение дат к объектам Date для корректной работы
+        attacks.forEach(a => { a.arrivalDate = new Date(a.arrivalDate); });
+
         incCache.attacks = attacks;
         incCache.playerVillages = playerVillages;
+        incCache.selectedAttack = null;
+        incCache.availableOptions = null;
+        persistIncState();
+
         status.innerText = `Статус: Атак: ${attacks.length} | Деревень: ${playerVillages.length}`;
         renderIncomingsList(container, attacks);
     };
 
     function renderSrezView(container, selectedAttack, availableOptions) {
+        if (!selectedAttack.arrivalDate || typeof selectedAttack.arrivalDate === 'string') {
+            selectedAttack.arrivalDate = new Date(selectedAttack.arrivalDate);
+        }
+
         if (availableOptions.length === 0) {
             container.innerHTML = `
                 <div style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center;">
@@ -1133,7 +1228,12 @@ javascript:(function() {
                 </div>
                 <div style="padding: 20px; text-align: center; color: #b22222; font-weight: bold; font-size: 11px;">Нет доступных вариантов для перехвата. Проверьте галочки юнитов и лимиты в верхнем меню.</div>
             `;
-            container.querySelector('#back-to-list').onclick = () => renderIncomingsList(container, incCache.attacks);
+            container.querySelector('#back-to-list').onclick = () => {
+                incCache.selectedAttack = null;
+                incCache.availableOptions = null;
+                persistIncState();
+                renderIncomingsList(container, incCache.attacks);
+            };
             container.querySelector('#refresh-srez-btn').onclick = () => {
                 generateSrezOptions(selectedAttack);
                 renderSrezView(container, selectedAttack, incCache.availableOptions);
@@ -1219,6 +1319,7 @@ javascript:(function() {
         container.querySelector('#back-to-list').onclick = () => {
             incCache.selectedAttack = null;
             incCache.availableOptions = null;
+            persistIncState();
             renderIncomingsList(container, incCache.attacks);
         };
 
@@ -1256,7 +1357,10 @@ javascript:(function() {
             const inputs = row.querySelectorAll('.unit-input-val');
             const sliderValLabel = row.querySelector('.slider-val');
 
-            row.querySelector('.sig-input-val').oninput = function() { opt.sigVal = this.value; };
+            row.querySelector('.sig-input-val').oninput = function() { 
+                opt.sigVal = this.value; 
+                persistIncState();
+            };
 
             slider.oninput = function() {
                 let percent = parseInt(this.value);
@@ -1273,6 +1377,7 @@ javascript:(function() {
             
             row.querySelector('.del-row-btn').onclick = function() {
                 availableOptions.splice(optIdx, 1);
+                persistIncState();
                 renderSrezView(container, selectedAttack, availableOptions);
             };
 
@@ -1312,9 +1417,10 @@ javascript:(function() {
         row.querySelector('.col-time').innerText = formatDateStr(new Date(sendTimeMs));
         row.dataset.sendMs = sendTimeMs;
         opt.sendMs = sendTimeMs;
+        persistIncState();
         updateRowBorders(row, sendTimeMs);
     }
 
     initStaticPanes();
     switchTab(currentActiveTab, false);
-})();
+})(); 
