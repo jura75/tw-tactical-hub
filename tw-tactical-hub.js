@@ -1,12 +1,12 @@
-    javascript:(function() {
-    // Функция для автоматического определения текущего мира из URL игры
+javascript:(function() {
+    // Функция для автоматического определения текущего мира из игры
     function getCurrentWorldServer() {
-        const host = window.location.host; // Например: "ru103.voynaplemyon.com"
+        const host = window.location.host;
         const match = host.match(/^(ru\d+)/i);
         if (match && match[1]) {
-            return match[1]; // Возвращает текущий мир, например "ru103"
+            return match[1];
         }
-        return 'ru103'; // Запасной вариант по умолчанию
+        return 'ru103';
     }
 
     const currentWorld = getCurrentWorldServer();
@@ -23,10 +23,9 @@
             .catch(err => console.error('Не удалось загрузить таймер с GitHub:', err));
     }
 
-    let existingPanel = document.getElementById('custom-tactical-hub');
-    if (existingPanel) {
-        existingPanel.remove();
-    }
+    // Проверяем, существует ли уже панель, чтобы не пересоздавать её и не терять состояние
+    let panel = document.getElementById('custom-tactical-hub');
+    const isAlreadyOpen = !!panel;
 
     let savedPlans = localStorage.getItem('tw_hub_planned_orders');
     let plannedOrders = savedPlans ? JSON.parse(savedPlans) : [];
@@ -35,20 +34,41 @@
     plannedOrders = plannedOrders.filter(order => (order.sendMs || 0) >= nowInitMs);
     localStorage.setItem('tw_hub_planned_orders', JSON.stringify(plannedOrders));
     
+    // Настройка режима мира (с луками или без луков)
+    let savedArchersMode = localStorage.getItem('tw_hub_archers_mode');
+    let hasArchers = savedArchersMode !== null ? savedArchersMode === 'true' : true; // по умолчанию с луками
+
+    // Базовые массивы для разных типов миров
+    const unitsWithoutArchers = {
+        names: ['Копья', 'Мечи', 'Топоры', 'Развед', 'ЛК', 'ТК', 'Тараны', 'Каты', 'Паладин', 'Двор'],
+        speeds: [1080, 1320, 1080, 540, 600, 660, 1800, 1800, 600, 2100]
+    };
+
+    const unitsWithArchers = {
+        names: ['Копья', 'Мечи', 'Топоры', 'Лучник', 'Развед', 'ЛК', 'КЛ', 'ТК', 'Тараны', 'Каты', 'Паладин', 'Двор'],
+        speeds: [1080, 1320, 1080, 1080, 540, 600, 600, 660, 1800, 1800, 600, 2100]
+    };
+
+    let activeUnitConfig = hasArchers ? unitsWithArchers : unitsWithoutArchers;
+    let UNIT_COUNT = activeUnitConfig.names.length;
+    let unitNames = activeUnitConfig.names;
+    let baseUnitSpeeds = activeUnitConfig.speeds;
+
     let savedFilters = localStorage.getItem('tw_hub_unit_filters');
-    let unitFilterStates = savedFilters ? JSON.parse(savedFilters) : [true, true, true, true, true, true, true, true, true];
+    let unitFilterStates = savedFilters ? JSON.parse(savedFilters) : Array(UNIT_COUNT).fill(true);
+    if (unitFilterStates.length !== UNIT_COUNT) {
+        unitFilterStates = Array(UNIT_COUNT).fill(true);
+    }
 
     let savedMinUnits = localStorage.getItem('tw_hub_min_units');
-    let unitMinValues = savedMinUnits ? JSON.parse(savedMinUnits) : [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let unitMinValues = savedMinUnits ? JSON.parse(savedMinUnits) : Array(UNIT_COUNT).fill(0);
+    if (unitMinValues.length !== UNIT_COUNT) {
+        unitMinValues = Array(UNIT_COUNT).fill(0);
+    }
 
     let savedTcTargets = localStorage.getItem('tw_hub_tc_targets') || '';
     let isMobileMode = localStorage.getItem('tw_hub_mobile_mode') === 'true';
     
-    // ТОЧНЫЕ БАЗОВЫЕ СКОРОСТИ ЮНИТОВ ПО ТАБЛИЦЕ (секунд на поле при скорости мира 1.0)
-    // Индексы: 0:Копья(1080), 1:Мечи(1320), 2:Топоры(1080), 3:Развед(540), 4:ЛК(600), 5:ТК(660), 6:Тараны(1800), 7:Каты(1800), 8:Паладин(600)
-    const baseUnitSpeeds = [1080, 1320, 1080, 540, 600, 660, 1800, 1800, 600]; 
-    const unitNames = ['Копья', 'Мечи', 'Топоры', 'Развед', 'ЛК', 'ТК', 'Тараны', 'Каты', 'Паладин'];
-
     let worldSpeed = parseFloat(localStorage.getItem('tw_hub_world_speed')) || 1.0;
 
     function getAdjustedSpeeds() {
@@ -200,21 +220,34 @@
         return new Date(now.getTime());
     }
 
-    const panel = document.createElement('div');
-    panel.id = 'custom-tactical-hub';
+    // Если панель уже открыта, переключаем видимость (показ/скрытие), фиксируя текущее состояние окна
+    if (isAlreadyOpen) {
+        if (panel.style.display === 'none' || panel.style.display === '') {
+            panel.style.display = 'flex';
+            initStaticPanes();
+            switchTab(currentActiveTab, false);
+        } else {
+            panel.style.display = 'none';
+        }
+        return;
+    } else {
+        panel = document.createElement('div');
+        panel.id = 'custom-tactical-hub';
+        document.body.appendChild(panel);
+    }
 
     function applyPanelStyles(mobile) {
         if (mobile) {
             panel.style.cssText = `
-                position: fixed; top: 10px; right: 10px; width: 380px; max-width: 95vw; height: 85vh; max-height: 90vh;
+                position: fixed; top: 10px; right: 10px; width: 420px; max-width: 95vw; height: 85vh; max-height: 90vh;
                 background: #2b1d0c; border: 2px solid #7d510f; box-shadow: 0 0 15px rgba(0,0,0,0.8);
                 z-index: 99999; font-family: Verdana, Arial, sans-serif; color: #f4e4bc; border-radius: 4px;
                 display: flex; flex-direction: column; overflow: hidden;
             `;
         } else {
             panel.style.cssText = `
-                position: fixed; top: 20px; left: 50%; transform: translateX(-50%); width: 1320px; min-width: 650px;
-                height: 650px; min-height: 400px; max-height: 95vh; max-width: 98vw;
+                position: fixed; top: 20px; left: 50%; transform: translateX(-50%); width: 1400px; min-width: 650px;
+                height: 680px; min-height: 400px; max-height: 95vh; max-width: 98vw;
                 background: #2b1d0c; border: 4px solid #7d510f; box-shadow: 0 0 25px rgba(0,0,0,0.9);
                 z-index: 99999; font-family: Verdana, Arial, sans-serif; color: #f4e4bc; border-radius: 4px;
                 display: flex; flex-direction: column; overflow: hidden;
@@ -224,33 +257,39 @@
 
     applyPanelStyles(isMobileMode);
 
-    let globalFiltersHtml = '';
-    for (let u = 0; u < 9; u++) {
-        globalFiltersHtml += `
-            <div style="display: flex; align-items: center; gap: 3px; background: #2b1d0c; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;">
-                <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px;">
-                    <input type="checkbox" class="global-unit-filter" data-unit-idx="${u}" ${unitFilterStates[u] ? 'checked' : ''} style="cursor: pointer; margin: 0;">
-                    <span style="color: #f4e4bc;">${unitNames[u]}</span>
-                </label>
-                <input type="number" class="global-min-unit-input" data-unit-idx="${u}" value="${unitMinValues[u]}" min="0" placeholder="мин" title="Минимум войск" style="width: 36px; font-size: 9px; text-align: center; background: #fff; border: 1px solid #7d510f; border-radius: 2px; padding: 1px; color: #000;">
-            </div>
-        `;
+    function buildFiltersHtml() {
+        let html = '';
+        for (let u = 0; u < UNIT_COUNT; u++) {
+            html += `
+                <div style="display: flex; align-items: center; gap: 2px; background: #2b1d0c; padding: 2px 4px; border: 1px solid #7d510f; border-radius: 3px;">
+                    <label style="display: flex; align-items: center; gap: 2px; cursor: pointer; font-size: 10px;">
+                        <input type="checkbox" class="global-unit-filter" data-unit-idx="${u}" ${unitFilterStates[u] ? 'checked' : ''} style="cursor: pointer; margin: 0;">
+                        <span style="color: #f4e4bc;">${unitNames[u]}</span>
+                    </label>
+                    <input type="number" class="global-min-unit-input" data-unit-idx="${u}" value="${unitMinValues[u]}" min="0" placeholder="мин" title="Минимум войск" style="width: 30px; font-size: 9px; text-align: center; background: #fff; border: 1px solid #7d510f; border-radius: 2px; padding: 1px; color: #000;">
+                </div>
+            `;
+        }
+        return html;
     }
 
     panel.innerHTML = `
         <div style="background: #1a1006; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f; cursor: move;" id="hub-drag-header">
             <div>
                 <b style="font-size: 13px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.54 (${currentWorld})</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.57 (${currentWorld})</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
                 <div style="display: flex; align-items: center; gap: 4px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Скорость текущего мира игры">
-                    <label style="font-size: 10px; color: #f4e4bc; font-weight: bold;">Скорость мира:</label>
-                    <input type="range" id="world-speed-slider" min="0.5" max="3.0" step="0.1" value="${worldSpeed}" style="width: 50px; height: 10px; cursor: pointer;">
-                    <input type="number" id="world-speed-input" min="0.1" max="10" step="0.1" value="${worldSpeed}" style="width: 38px; font-size: 10px; text-align: center; background: #fff; border: 1px solid #7d510f; border-radius: 2px; color: #000;">
+                    <label style="font-size: 10px; color: #f4e4bc; font-weight: bold;">Скорость:</label>
+                    <input type="range" id="world-speed-slider" min="0.5" max="3.0" step="0.1" value="${worldSpeed}" style="width: 45px; height: 10px; cursor: pointer;">
+                    <input type="number" id="world-speed-input" min="0.1" max="10" step="0.1" value="${worldSpeed}" style="width: 35px; font-size: 10px; text-align: center; background: #fff; border: 1px solid #7d510f; border-radius: 2px; color: #000;">
                 </div>
-                <label style="font-size: 11px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Компактный вид по размеру мобильного экрана">
-                    <input type="checkbox" id="hub-mobile-mode-chk" ${isMobileMode ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 📱 Мобильный
+                <label style="font-size: 10px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Включить мир с лучниками (Лучники и КЛ)">
+                    <input type="checkbox" id="archers-mode-chk" ${hasArchers ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 🏹 Луки/КЛ
+                </label>
+                <label style="font-size: 10px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 3px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Компактный вид по размеру мобильного экрана">
+                    <input type="checkbox" id="hub-mobile-mode-chk" ${isMobileMode ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 📱 Моб.
                 </label>
                 <button id="hub-run-timer-btn" style="background: #4a7c59; border: 1px solid #284731; color: #fff; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px; font-size: 11px;">⚡ Таймер</button>
                 <button id="hub-scan-btn" style="background: #c19a5b; border: 1px solid #5a3b0c; color: #2b1d0c; font-weight: bold; padding: 3px 8px; cursor: pointer; border-radius: 3px; font-size: 11px;">Сканировать</button>
@@ -258,9 +297,11 @@
             </div>
         </div>
         
-        <div style="background: #3b2812; padding: 6px 12px; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid #7d510f; flex-wrap: wrap;">
-            <span style="font-size: 11px; font-weight: bold; color: #e3d2ab; margin-right: 4px;">Фильтр и мин. кол-во:</span>
-            ${globalFiltersHtml}
+        <div id="hub-filters-container" style="background: #3b2812; padding: 6px 12px; display: flex; align-items: center; gap: 4px; border-bottom: 2px solid #7d510f; flex-wrap: wrap;">
+            <span style="font-size: 11px; font-weight: bold; color: #e3d2ab; margin-right: 2px;">Фильтр юнитов:</span>
+            <div id="global-filters-inner" style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+                ${buildFiltersHtml()}
+            </div>
         </div>
 
         <div style="background: #2b1d0c; padding: 6px 12px; display: flex; gap: 6px; border-bottom: 1px solid #5a3b0c;">
@@ -279,11 +320,72 @@
         </div>
     `;
 
-    document.body.appendChild(panel);
-
     const worldSpeedSlider = document.getElementById('world-speed-slider');
     const worldSpeedInput = document.getElementById('world-speed-input');
     const footerSpeedVal = document.getElementById('footer-speed-val');
+    const archersModeChk = document.getElementById('archers-mode-chk');
+
+    function bindFilterEvents() {
+        panel.querySelectorAll('.global-unit-filter').forEach(chk => {
+            chk.onchange = function() {
+                let uIdx = parseInt(this.getAttribute('data-unit-idx'));
+                unitFilterStates[uIdx] = this.checked;
+                localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
+                
+                if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
+                    generateSrezOptions(incCache.selectedAttack);
+                    renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
+                }
+            };
+        });
+
+        panel.querySelectorAll('.global-min-unit-input').forEach(inp => {
+            inp.oninput = function() {
+                let uIdx = parseInt(this.getAttribute('data-unit-idx'));
+                let val = parseInt(this.value);
+                unitMinValues[uIdx] = isNaN(val) ? 0 : val;
+                localStorage.setItem('tw_hub_min_units', JSON.stringify(unitMinValues));
+
+                if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
+                    generateSrezOptions(incCache.selectedAttack);
+                    renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
+                }
+            };
+        });
+    }
+
+    archersModeChk.onchange = function() {
+        hasArchers = this.checked;
+        localStorage.setItem('tw_hub_archers_mode', hasArchers);
+
+        activeUnitConfig = hasArchers ? unitsWithArchers : unitsWithoutArchers;
+        UNIT_COUNT = activeUnitConfig.names.length;
+        unitNames = activeUnitConfig.names;
+        baseUnitSpeeds = activeUnitConfig.speeds;
+
+        unitFilterStates = Array(UNIT_COUNT).fill(true);
+        unitMinValues = Array(UNIT_COUNT).fill(0);
+        localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
+        localStorage.setItem('tw_hub_min_units', JSON.stringify(unitMinValues));
+
+        unitSpeeds = getAdjustedSpeeds();
+
+        document.getElementById('global-filters-inner').innerHTML = buildFiltersHtml();
+        bindFilterEvents();
+
+        incCache.cachedVillages = null;
+        tcCache.cachedVillages = null;
+        tcCache.selectedPairs = null;
+        incCache.selectedAttack = null;
+        incCache.availableOptions = null;
+        persistTcState();
+        persistIncState();
+
+        initStaticPanes();
+        document.getElementById('hub-status').innerText = `Статус: Режим сменен (${hasArchers ? 'с луками' : 'без луков'})`;
+    };
+
+    bindFilterEvents();
 
     function updateWorldSpeed(newSpeed) {
         worldSpeed = Math.max(0.1, parseFloat(newSpeed) || 1.0);
@@ -390,33 +492,6 @@
 
     document.getElementById('hub-close-btn').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('hub-run-timer-btn').onclick = () => { runExternalTimer(); };
-
-    panel.querySelectorAll('.global-unit-filter').forEach(chk => {
-        chk.onchange = function() {
-            let uIdx = parseInt(this.getAttribute('data-unit-idx'));
-            unitFilterStates[uIdx] = this.checked;
-            localStorage.setItem('tw_hub_unit_filters', JSON.stringify(unitFilterStates));
-            
-            if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
-                generateSrezOptions(incCache.selectedAttack);
-                renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
-            }
-        };
-    });
-
-    panel.querySelectorAll('.global-min-unit-input').forEach(inp => {
-        inp.oninput = function() {
-            let uIdx = parseInt(this.getAttribute('data-unit-idx'));
-            let val = parseInt(this.value);
-            unitMinValues[uIdx] = isNaN(val) ? 0 : val;
-            localStorage.setItem('tw_hub_min_units', JSON.stringify(unitMinValues));
-
-            if (currentActiveTab === 'incomings' && incCache.selectedAttack) {
-                generateSrezOptions(incCache.selectedAttack);
-                renderSrezView(document.getElementById('tab-pane-incomings'), incCache.selectedAttack, incCache.availableOptions);
-            }
-        };
-    });
 
     function initStaticPanes() {
         renderTimeCoordsTab(document.getElementById('tab-pane-timecoords'));
@@ -679,10 +754,10 @@
                                     let text = col.innerText.trim();
                                     if (/^\d+$/.test(text) && text.length < 7) cleanUnits.push(text);
                                 });
-                                while(cleanUnits.length < 9) cleanUnits.push('0');
+                                while(cleanUnits.length < UNIT_COUNT) cleanUnits.push('0');
 
                                 if (!playerVillages.some(v => v.id === matchId[1])) {
-                                    playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, 9) });
+                                    playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, UNIT_COUNT) });
                                 }
                             }
                         }
@@ -690,7 +765,7 @@
                 } catch (e) {}
 
                 if (playerVillages.length === 0 && typeof game_data !== 'undefined') {
-                    playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
+                    playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: Array(UNIT_COUNT).fill('100') });
                 }
                 tcCache.cachedVillages = playerVillages;
             }
@@ -705,7 +780,7 @@
                     
                     const dist = getDistance(vil.coords, target);
 
-                    for (let u = 0; u < 9; u++) {
+                    for (let u = 0; u < UNIT_COUNT; u++) {
                         if (!unitFilterStates[u]) continue; 
 
                         let availableCount = parseInt(vil.units[u] || 0);
@@ -749,7 +824,7 @@
 
                         if (sendMs < currentNowMs) continue;
 
-                        let unitsArr = ['0','0','0','0','0','0','0','0','0'];
+                        let unitsArr = Array(UNIT_COUNT).fill('0');
                         unitsArr[u] = availableCount.toString();
 
                         let newPair = {
@@ -839,14 +914,14 @@
             let [tX, tY] = pair.target.split('|');
 
             let unitInputs = '';
-            for (let u = 0; u < 9; u++) {
+            for (let u = 0; u < UNIT_COUNT; u++) {
                 let maxVal = vil.units[u] !== undefined ? parseInt(vil.units[u]) : 0;
                 let curVal = pair.currentUnits[u] !== undefined ? pair.currentUnits[u] : 0;
                 
                 unitInputs += `
-                    <td style="padding: 3px; border-right: 1px solid #e2d2b5;">
-                        <input type="text" class="tc-unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${curVal}" style="width: 28px; font-size: 10px; text-align: center; background: #fff; border: 2px solid #ccc;">
-                        <br><span style="font-size: 8px; color: #555;">${maxVal}</span>
+                    <td style="padding: 2px; border-right: 1px solid #e2d2b5;">
+                        <input type="text" class="tc-unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${curVal}" style="width: 24px; font-size: 9px; text-align: center; background: #fff; border: 2px solid #ccc;">
+                        <br><span style="font-size: 7px; color: #555;">${maxVal}</span>
                     </td>
                 `;
             }
@@ -863,7 +938,7 @@
                     </td>
                     ${unitInputs}
                     <td style="padding: 3px; border-right: 1px solid #e2d2b5;">
-                        <input type="text" class="tc-sig-input-val" value="${pair.sigVal}" style="width: 22px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                        <input type="text" class="tc-sig-input-val" value="${pair.sigVal}" style="width: 20px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;">
                     </td>
                     <td style="padding: 3px; border-right: 1px solid #e2d2b5; font-size: 10px;">
                         <div style="font-size: 8px; color: #555; margin-bottom: 2px; display: flex; align-items: center; justify-content: center; gap: 3px;">
@@ -872,7 +947,7 @@
                                 <input type="checkbox" class="tc-lock-time-chk" ${pair.lockTime ? 'checked' : ''} style="cursor: pointer; width: 10px; height: 10px; margin: 0;">
                             </label>
                         </div>
-                        <input type="text" class="tc-indiv-arr-input" value="${pair.indivArrStr || defaultArrivalStr}" style="width: 110px; font-size: 9px; text-align: center; border: 1px solid #7d510f; background: #fff;">
+                        <input type="text" class="tc-indiv-arr-input" value="${pair.indivArrStr || defaultArrivalStr}" style="width: 105px; font-size: 9px; text-align: center; border: 1px solid #7d510f; background: #fff;">
                     </td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="tc-col-arrival">00:00:00</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="tc-col-time">${formattedTime}</td>
@@ -888,23 +963,23 @@
         });
 
         let headerUnitsHtml = '';
-        for(let u=0; u<9; u++) {
-            headerUnitsHtml += `<th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">${unitNames[u]}</th>`;
+        for(let u=0; u<UNIT_COUNT; u++) {
+            headerUnitsHtml += `<th style="padding: 4px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">${unitNames[u]}</th>`;
         }
 
         resultsArea.innerHTML = `
             <div style="font-weight: bold; margin-bottom: 6px; color: #5a2d0c; font-size: 11px;">Найдено актуальных вариантов: ${selectedPairs.length}</div>
-            <div style="overflow-x: auto; max-height: 250px; border: 1px solid #7d510f;">
+            <div style="overflow-x: auto; max-height: 280px; border: 1px solid #7d510f;">
                 <table id="tc-options-table" style="width: 100%; border-collapse: collapse; background: #fff; font-size: 10px; text-align: center;">
                     <tr style="background: #d4bc8c; border-bottom: 2px solid #7d510f; font-weight: bold; position: sticky; top: 0; z-index: 5;">
                         <th style="padding: 5px; border-right: 1px solid #c19a5b; width: 110px; font-size: 9px;">Источник → Цель</th>
                         ${headerUnitsHtml}
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Сиг</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время прихода</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Приход (сейчас)</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время отправки</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время в пути</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Таймер</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Сиг</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время прихода</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Приход (сейчас)</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время отправки</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время в пути</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Таймер</th>
                         <th style="padding: 5px; font-size: 9px;">Действие</th>
                     </tr>
                     ${tableRowsHtml}
@@ -1105,7 +1180,7 @@
         const currentNowMs = new Date().getTime();
 
         incCache.playerVillages.forEach((vil) => {
-            for (let u = 0; u < 9; u++) {
+            for (let u = 0; u < UNIT_COUNT; u++) {
                 if (!unitFilterStates[u]) continue;
                 let availableCount = parseInt(vil.units[u] || 0);
                 let minReq = unitMinValues[u] || 0;
@@ -1118,7 +1193,7 @@
 
                 if (initialSendMs < currentNowMs) continue;
 
-                let unitsArr = ['0','0','0','0','0','0','0','0','0'];
+                let unitsArr = Array(UNIT_COUNT).fill('0');
                 unitsArr[u] = availableCount.toString();
                 availableOptions.push({ vil: vil, activeUnitIdx: u, sendMs: initialSendMs, currentUnits: unitsArr, sliderVal: 100, sigVal: '0' });
             }
@@ -1194,9 +1269,9 @@
                             let text = col.innerText.trim();
                             if (/^\d+$/.test(text) && text.length < 7) cleanUnits.push(text);
                         });
-                        while(cleanUnits.length < 9) cleanUnits.push('0');
+                        while(cleanUnits.length < UNIT_COUNT) cleanUnits.push('0');
                         if (!playerVillages.some(v => v.id === matchId[1])) {
-                            playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, 9) });
+                            playerVillages.push({ id: matchId[1], coords: matchCoord[0], units: cleanUnits.slice(0, UNIT_COUNT) });
                         }
                     }
                 }
@@ -1204,7 +1279,7 @@
         } catch (e) {}
 
         if (playerVillages.length === 0 && typeof game_data !== 'undefined') {
-            playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: ['0','0','2948','0','1947','0','108','40','0'] });
+            playerVillages.push({ id: game_data.village.id, coords: game_data.village.coord, units: Array(UNIT_COUNT).fill('100') });
         }
 
         attacks.forEach(a => { a.arrivalDate = new Date(a.arrivalDate); });
@@ -1260,13 +1335,13 @@
             let formattedTravelTime = formatDuration(travelTimeMsVal);
 
             let unitInputs = '';
-            for (let u = 0; u < 9; u++) {
+            for (let u = 0; u < UNIT_COUNT; u++) {
                 let maxVal = parseInt(vil.units[u]) || 0;
                 
                 unitInputs += `
-                    <td style="padding: 3px; border-right: 1px solid #e2d2b5;">
-                        <input type="text" class="unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${opt.currentUnits[u]}" style="width: 28px; font-size: 10px; text-align: center; background: #fff; border: 2px solid #ccc;">
-                        <br><span style="font-size: 8px; color: #555;">${maxVal}</span>
+                    <td style="padding: 2px; border-right: 1px solid #e2d2b5;">
+                        <input type="text" class="unit-input-val" data-max="${maxVal}" data-unit-idx="${u}" value="${opt.currentUnits[u]}" style="width: 24px; font-size: 9px; text-align: center; background: #fff; border: 2px solid #ccc;">
+                        <br><span style="font-size: 7px; color: #555;">${maxVal}</span>
                     </td>
                 `;
             }
@@ -1282,7 +1357,7 @@
                         </div>
                     </td>
                     ${unitInputs}
-                    <td style="padding: 3px; border-right: 1px solid #e2d2b5;"><input type="text" class="sig-input-val" value="${opt.sigVal}" style="width: 22px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;"></td>
+                    <td style="padding: 3px; border-right: 1px solid #e2d2b5;"><input type="text" class="sig-input-val" value="${opt.sigVal}" style="width: 20px; font-size: 10px; text-align: center; border: 1px solid #7d510f; background: #fff;"></td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="col-time">${formatDateStr(new Date(opt.sendMs))}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px; color: #333;" class="col-travel-time">${formattedTravelTime}</td>
                     <td style="padding: 6px; border-right: 1px solid #e2d2b5; font-weight: bold; font-size: 10px;" class="col-arrival-time">${formatDateStr(selectedAttack.arrivalDate)}</td>
@@ -1297,8 +1372,8 @@
         });
 
         let headerUnitsHtml = '';
-        for(let u=0; u<9; u++) {
-            headerUnitsHtml += `<th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">${unitNames[u]}</th>`;
+        for(let u=0; u<UNIT_COUNT; u++) {
+            headerUnitsHtml += `<th style="padding: 4px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">${unitNames[u]}</th>`;
         }
 
         container.innerHTML = `
@@ -1312,16 +1387,16 @@
             <div style="background: #fff; border: 1px solid #7d510f; padding: 6px 10px; margin-bottom: 8px; border-radius: 3px; font-size: 10px;">
                 <b>Атака:</b> ${selectedAttack.origin} → ${selectedAttack.target} | <b>Прибытие:</b> <span style="color: #b22222; font-weight: bold;">${selectedAttack.arrival}</span>
             </div>
-            <div style="overflow-x: auto; max-height: 250px; border: 1px solid #7d510f;">
+            <div style="overflow-x: auto; max-height: 280px; border: 1px solid #7d510f;">
                 <table id="options-table" style="width: 100%; border-collapse: collapse; background: #fff; font-size: 10px; text-align: center;">
                     <tr style="background: #d4bc8c; border-bottom: 2px solid #7d510f; font-weight: bold; position: sticky; top: 0; z-index: 5;">
                         <th style="padding: 5px; border-right: 1px solid #c19a5b; width: 100px; font-size: 9px;">Деревня / Юнит</th>
                         ${headerUnitsHtml}
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Сиг</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время отправки</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время в пути</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Время прибытия</th>
-                        <th style="padding: 5px 3px; border-right: 1px solid #c19a5b; font-size: 9px;">Таймер</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Сиг</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время отправки</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время в пути</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Время прибытия</th>
+                        <th style="padding: 5px 2px; border-right: 1px solid #c19a5b; font-size: 8px;">Таймер</th>
                         <th style="padding: 5px; font-size: 9px;">Приказ</th>
                     </tr>
                     ${tableRowsHtml}
