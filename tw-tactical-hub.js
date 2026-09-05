@@ -36,6 +36,10 @@
     let savedArchersMode = localStorage.getItem('tw_hub_archers_mode');
     let hasArchers = savedArchersMode !== null ? savedArchersMode === 'true' : true;
 
+    // Состояние чекбокса скрытия подкреплений
+    let hideSupportSaved = localStorage.getItem('tw_hub_hide_support');
+    let hideSupportMode = hideSupportSaved !== null ? hideSupportSaved === 'true' : false;
+
     const unitsWithoutArchers = {
         names: ['Копья', 'Мечи', 'Топоры', 'Развед', 'ЛК', 'ТК', 'Тараны', 'Каты', 'Паладин', 'Двор'],
         speeds: [1080, 1320, 1080, 540, 600, 660, 1800, 1800, 600, 2100]
@@ -159,7 +163,6 @@
         if (countElem) countElem.innerText = plannedOrders.length;
     }
 
-    // Улучшенный парсер даты/времени из второго файла (поддержка формата игры и дат вроде "сегодня в 12:00")
     function parseArrivalTime(arrivalStr) {
         const now = new Date();
         if (!arrivalStr) return new Date(now.getTime());
@@ -177,7 +180,6 @@
             return new Date(year, month, day, hours, minutes, seconds, ms);
         }
 
-        // Поддержка текстовых форматов (сегодня в / tomorrow at и т.д.)
         const dateTimeMatch = /(?:[A-Z][a-z]{2}\s+\d{1,2},\s*\d{0,4}\s+|сегодня\s+в\s+|завтра\s+в\s+|today\s+at\s+|tomorrow\s+at\s+)\d{1,2}:\d{2}:\d{2}:?\.?\d{0,3}/i;
         if (dateTimeMatch.test(cleanStr)) {
             let timeMatch = cleanStr.match(/(\d{1,2}):(\d{2}):(\d{2})(?:[\.:](\d{1,3}))?/);
@@ -271,7 +273,7 @@
         <div style="background: #1a1006; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7d510f; cursor: move;" id="hub-drag-header">
             <div>
                 <b style="font-size: 13px; color: #f4e4bc;">Custom Tactical Hub</b>
-                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.58 (${currentWorld})</span>
+                <span style="font-size: 10px; color: #a98a5c; margin-left: 8px;">v6.9.60 (${currentWorld})</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
                 <div style="display: flex; align-items: center; gap: 4px; background: #3b2812; padding: 2px 6px; border: 1px solid #7d510f; border-radius: 3px;" title="Скорость текущего мира игры">
@@ -298,10 +300,17 @@
             </div>
         </div>
 
-        <div style="background: #2b1d0c; padding: 6px 12px; display: flex; gap: 6px; border-bottom: 1px solid #5a3b0c;">
-            <button class="hub-tab-btn" data-tab="incomings" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">Входящие</button>
-            <button class="hub-tab-btn" data-tab="timecoords" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">Тайм-коры</button>
-            <button class="hub-tab-btn" data-tab="plan" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">План (<span id="plan-count">${plannedOrders.length}</span>)</button>
+        <div style="background: #2b1d0c; padding: 6px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #5a3b0c;">
+            <div style="display: flex; gap: 6px;">
+                <button class="hub-tab-btn" data-tab="incomings" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">Входящие</button>
+                <button class="hub-tab-btn" data-tab="timecoords" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">Тайм-коры</button>
+                <button class="hub-tab-btn" data-tab="plan" style="background: #2b1d0c; color: #e3d2ab; border: 1px solid #7d510f; padding: 4px 12px; font-weight: bold; cursor: pointer; border-radius: 3px; font-size: 11px;">План (<span id="plan-count">${plannedOrders.length}</span>)</button>
+            </div>
+            <div>
+                <label style="font-size: 11px; color: #f4e4bc; cursor: pointer; display: flex; align-items: center; gap: 4px; background: #3b2812; padding: 3px 8px; border: 1px solid #7d510f; border-radius: 3px;">
+                    <input type="checkbox" id="hub-hide-support-chk" ${hideSupportMode ? 'checked' : ''} style="cursor: pointer; margin: 0;"> 🛡️ Скрыть подкрепления
+                </label>
+            </div>
         </div>
         <div id="hub-body" style="padding: 12px; background: #f4e4bc; color: #2b1d0c; flex-grow: 1; overflow-y: auto; min-height: 250px;">
             <div id="tab-pane-incomings" class="hub-pane" style="display:none;"></div>
@@ -318,6 +327,15 @@
     const worldSpeedInput = document.getElementById('world-speed-input');
     const footerSpeedVal = document.getElementById('footer-speed-val');
     const archersModeChk = document.getElementById('archers-mode-chk');
+    const hideSupportChk = document.getElementById('hub-hide-support-chk');
+
+    hideSupportChk.onchange = function() {
+        hideSupportMode = this.checked;
+        localStorage.setItem('tw_hub_hide_support', hideSupportMode);
+        if (currentActiveTab === 'incomings' && incCache.attacks) {
+            renderIncomingsList(document.getElementById('tab-pane-incomings'), incCache.attacks);
+        }
+    };
 
     function bindFilterEvents() {
         panel.querySelectorAll('.global-unit-filter').forEach(chk => {
@@ -970,26 +988,45 @@
     }
 
     function renderIncomingsList(container, attacks) {
+        // Улучшенная фильтрация подкреплений (проверяем тип, alt-атрибуты и изображения)
+        let filteredAttacks = attacks.filter(att => {
+            if (!hideSupportMode) return true;
+            let typeLower = (att.type || '').toLowerCase();
+            let isSupport = typeLower.includes('подкр') || 
+                            typeLower.includes('support') || 
+                            typeLower.includes('подкрепление') || 
+                            typeLower.includes('help') ||
+                            typeLower.includes('return') ||
+                            typeLower.includes('возврат');
+            return !isSupport;
+        });
+
         let html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <p style="font-weight: bold; margin: 0; font-size: 11px;">Активные входящие атаки (${attacks.length}):</p>
+                <p style="font-weight: bold; margin: 0; font-size: 11px;">Активные входящие атаки (${filteredAttacks.length} из ${attacks.length}):</p>
                 <button id="inc-clear-list-btn" style="background: #a63a3a; color: #fff; border: 1px solid #5a0c0c; padding: 2px 6px; font-size: 9px; font-weight: bold; cursor: pointer; border-radius: 2px;">Очистить список</button>
             </div>
         `;
-        attacks.forEach(att => {
-            html += `
-                <div style="background: #fff; border: 1px solid #c19a5b; padding: 8px; margin-bottom: 6px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
-                    <div>
-                        <div style="font-weight: bold; font-size: 11px; color: #5a2d0c; margin-bottom: 3px;">🛡️ #${att.id} | ${att.type} • Цель: ${att.target}</div>
-                        <div style="font-size: 10px; color: #666;">Откуда: <b>${att.origin}</b> | Прибытие: <span style="color: #b22222; font-weight: bold;">${att.arrival}</span></div>
+
+        if (filteredAttacks.length === 0) {
+            html += `<div style="padding: 15px; text-align: center; color: #555; font-size: 11px;">Нет входящих (возможно, все скрыты фильтром подкреплений).</div>`;
+            container.innerHTML = html;
+        } else {
+            filteredAttacks.forEach(att => {
+                html += `
+                    <div style="background: #fff; border: 1px solid #c19a5b; padding: 8px; margin-bottom: 6px; border-radius: 3px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                        <div>
+                            <div style="font-weight: bold; font-size: 11px; color: #5a2d0c; margin-bottom: 3px;">🛡️ #${att.id} | ${att.type} • Цель: ${att.target}</div>
+                            <div style="font-size: 10px; color: #666;">Откуда: <b>${att.origin}</b> | Прибытие: <span style="color: #b22222; font-weight: bold;">${att.arrival}</span></div>
+                        </div>
+                        <div>
+                            <button class="open-srez-btn" data-id="${att.id}" style="background: #e3d2ab; border: 1px solid #7d510f; font-weight: bold; font-size: 10px; padding: 4px 8px; cursor: pointer; border-radius: 3px;">Срез / Перехват</button>
+                        </div>
                     </div>
-                    <div>
-                        <button class="open-srez-btn" data-id="${att.id}" style="background: #e3d2ab; border: 1px solid #7d510f; font-weight: bold; font-size: 10px; padding: 4px 8px; cursor: pointer; border-radius: 3px;">Срез / Перехват</button>
-                    </div>
-                </div>
-            `;
-        });
-        container.innerHTML = html;
+                `;
+            });
+            container.innerHTML = html;
+        }
 
         container.querySelector('#inc-clear-list-btn').onclick = function() {
             incCache.attacks = null; incCache.selectedAttack = null; incCache.availableOptions = null;
@@ -1059,7 +1096,17 @@
             rows.forEach((row, index) => {
                 const cols = row.querySelectorAll('td');
                 if (cols.length >= 6) {
-                    let type = cols[0].innerText.trim() || 'Атака';
+                    let typeText = cols[0].innerText.trim();
+                    let imgIcon = cols[0].querySelector('img');
+                    if (imgIcon && imgIcon.alt) {
+                        typeText += ' ' + imgIcon.alt;
+                    }
+                    let rowHtml = row.innerHTML.toLowerCase();
+                    if (rowHtml.includes('support') || rowHtml.includes('command/support') || rowHtml.includes('attack_support')) {
+                        typeText += ' подкрепление';
+                    }
+
+                    let type = typeText || 'Атака';
                     let targetText = cols[1].innerText.trim();
                     let originElem = cols[2].querySelector('a');
                     let originText = originElem ? originElem.innerText.trim() : cols[2].innerText.trim();
